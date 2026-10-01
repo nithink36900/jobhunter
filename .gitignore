@@ -1,0 +1,9 @@
+.env
+data/jobs.db
+data/matches.*
+data/letters/
+data/.browser_profile/
+__pycache__/
+*.pyc
+data/settings.json
+.venv/

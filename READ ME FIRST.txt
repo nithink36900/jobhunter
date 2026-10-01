@@ -1,0 +1,22 @@
+JOBHUNTER - HOW TO USE (no technical knowledge needed)
+
+ONE-TIME:
+  1. Install Python from https://www.python.org/downloads/
+     On the first screen tick the box "Add python.exe to PATH", then click Install.
+
+EVERY TIME:
+  2. Double-click the file "Start JobHunter" (the one with the gear icon, ending in .bat).
+     - The first time, a black window installs things for a few minutes. Just wait.
+     - Then your web browser opens JobHunter by itself.
+     - If Windows says "protected your PC", click "More info", then "Run anyway".
+  3. In the browser, click "Settings" and paste your Apify token, then click Save token.
+     (Get it at console.apify.com > Settings > API and integrations.)
+  4. Click "Find & Apply" > "Search for new jobs". Wait for "Finished".
+  5. Click "Jobs" to see them. Click any job to see details and its cover letter.
+  6. Back in "Find & Apply", click "Start applying". A window and a browser open for each job:
+     check the form, click Submit yourself, then press Enter in the black window.
+
+TO STOP: close the black window.
+
+Keep this folder as it is. Your jobs and settings are stored inside it (the "data" folder).
+Never share the file called ".env": it holds your private token.

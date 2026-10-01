@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JobHunter</title>
+<style>
+:root{--bg:#f6f7f9;--panel:#fff;--ink:#1c2530;--mute:#66707d;--line:#dfe3e8;--accent:#0f6e8c;--onaccent:#fff;
+--new:#7b8794;--applied:#2e7d5b;--opened_manual:#b7791f;--submitted_auto:#1f6f4a;--interview:#5b4bb7;
+--offer:#0f6e8c;--rejected:#b23a48;--skipped:#a4acb6;--error:#b23a48}
+@media (prefers-color-scheme:dark){:root{--bg:#131920;--panel:#1b232c;--ink:#e6eaef;--mute:#93a0ae;--line:#2c3743;--accent:#4db3d1;--onaccent:#0c1a20}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+header{background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+.head{max-width:1040px;margin:0 auto;padding:0 16px;display:flex;align-items:center;gap:24px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:18px;padding:12px 0}
+nav{display:flex;gap:4px}
+nav button{border:0;background:none;color:var(--mute);font:inherit;padding:14px 12px;cursor:pointer;border-bottom:3px solid transparent}
+nav button[aria-selected=true]{color:var(--ink);font-weight:600;border-color:var(--accent)}
+main{max-width:1040px;margin:0 auto;padding:24px 16px 80px}
+h2{font-size:20px;margin:0 0 4px}h3{font-size:15px;margin:22px 0 8px}
+.sub{color:var(--mute);margin:0 0 18px}
+button,select,input,textarea{font-family:inherit;font-size:14px;color:var(--ink)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn{display:inline-block;text-decoration:none;background:var(--accent);color:var(--onaccent);border:0;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:none;color:var(--accent);border:1px solid var(--line)}
+input[type=search],input[type=number],select,textarea{padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel)}
+textarea{width:100%;resize:vertical}
+.stats{display:flex;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:8px;margin-bottom:18px}
+.stat{flex:1 1 130px;padding:14px 16px;border-right:1px solid var(--line)}.stat:last-child{border-right:0}
+.stat b{display:block;font-size:26px;line-height:1.2}.stat span{color:var(--mute);font-size:13px}
+.bar{display:flex;height:34px;border-radius:6px;overflow:hidden;background:var(--line);gap:2px}
+.seg{border:0;padding:0 8px;color:#fff;font-weight:600;font-size:13px;cursor:pointer;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg[aria-pressed=true]{box-shadow:inset 0 -4px 0 rgba(255,255,255,.75)}
+.tools{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap}.tools input{flex:1;min-width:180px}
+.list{background:var(--panel);border:1px solid var(--line);border-radius:8px}
+.row{display:grid;grid-template-columns:52px 1fr 130px;gap:12px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer;width:100%;text-align:left;background:none;border-left:0;border-right:0;border-top:0;border-radius:0}
+.row:last-child{border-bottom:0}.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.score{font-weight:700;font-size:18px}.title{font-weight:600}.meta{color:var(--mute);font-size:13px}
+.pill{justify-self:end;font-size:12px;font-weight:600;color:#fff;border-radius:999px;padding:2px 10px;background:var(--c)}
+.empty{padding:36px;text-align:center;color:var(--mute)}
+#dr{position:fixed;top:0;right:0;bottom:0;width:min(520px,100%);background:var(--panel);border-left:1px solid var(--line);z-index:10;overflow:auto;padding:20px;transform:translateX(102%);visibility:hidden}
+#dr.open{transform:none;visibility:visible;box-shadow:-8px 0 24px rgba(0,0,0,.15)}
+@media (prefers-reduced-motion:no-preference){#dr{transition:transform .2s,visibility .2s}}
+.kv{display:grid;grid-template-columns:110px 1fr;gap:4px 12px;font-size:14px;margin:12px 0}.kv dt{color:var(--mute)}.kv dd{margin:0}
+.box{white-space:pre-wrap;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:10px;font-size:13px;max-height:260px;overflow:auto}
+pre.log{background:#0f1720;color:#cfe3ee;border-radius:8px;padding:14px;min-height:200px;max-height:420px;overflow:auto;font:12.5px/1.5 Consolas,monospace;white-space:pre-wrap}
+.chips{display:flex;flex-wrap:wrap;gap:6px}.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:13px;background:var(--panel)}
+.form{display:grid;gap:14px;max-width:560px}.form label{display:grid;gap:4px;font-weight:600;font-size:14px}.form small{font-weight:400;color:var(--mute)}
+.checks{display:flex;gap:16px;font-weight:400}.checks label{display:flex;gap:6px;font-weight:400}
+.banner{background:color-mix(in srgb,var(--opened_manual) 14%,var(--panel));border:1px solid var(--opened_manual);border-radius:8px;padding:12px 14px;margin-bottom:18px}
+.note{color:var(--mute);font-size:13px}.ok{color:var(--applied)}.bad{color:var(--rejected)}
+</style>
+</head>
+<body>
+<header><div class="head">
+  <div class="brand">JobHunter</div>
+  <nav id="nav" role="tablist">
+    <button data-v="overview" role="tab">Overview</button>
+    <button data-v="jobs" role="tab">Jobs</button>
+    <button data-v="run" role="tab">Find &amp; Apply</button>
+    <button data-v="settings" role="tab">Settings</button>
+  </nav>
+</div></header>
+<main id="view"></main>
+<aside id="dr" aria-label="Job details"></aside>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+const label = s => s.replace(/_/g, " ");
+const col = s => `var(--${s})`;
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: "POST",
+    headers: {"Content-Type": "application/json", "X-JobHunter": "1"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || "Request failed (" + r.status + ")");
+  return d;
+}
+let tokenSet = true, jobs = [], statuses = [], view = "overview", filter = "all", timer = null, wasRunning = false;
+
+async function load() {
+  try { const d = await api("/api/jobs"); jobs = d.jobs; statuses = d.statuses; tokenSet = d.token_set; }
+  catch (e) { $("#view").innerHTML = `<p class="bad">Can't reach the app. Make sure <code>python run.py dashboard</code> is still running.</p>`; return false; }
+  return true;
+}
+const counts = () => jobs.reduce((c, j) => (c[j.status] = (c[j.status] || 0) + 1, c), {});
+
+function pipeline(c) {
+  return `<div class="bar" role="group" aria-label="Jobs by stage">` + statuses.filter(s => c[s]).map(s =>
+    `<button class="seg" style="flex:${c[s]};background:${col(s)}" data-f="${s}" aria-pressed="${filter === s}"
+     title="${label(s)}: ${c[s]}">${label(s)} ${c[s]}</button>`).join("") + `</div>`;
+}
+
+/* ---------- Overview ---------- */
+function overview() {
+  const c = counts(), n = jobs.length;
+  const applied = jobs.filter(j => ["applied", "submitted_auto", "interview", "offer"].includes(j.status)).length;
+  const avg = n ? Math.round(jobs.reduce((a, j) => a + j.score, 0) / n) : 0;
+  const top = jobs.filter(j => j.status === "new").slice(0, 5);
+  $("#view").innerHTML = `<h2>Overview</h2>
+    ${tokenSet ? "" : `<div class="banner"><b>One quick step first:</b> paste your Apify token in <a href="#" data-go="settings">Settings</a> so JobHunter can search for jobs.</div>`}
+    <p class="sub">${n ? "Where your applications stand." : "Nothing tracked yet. Open the Find &amp; Apply tab and run your first search."}</p>
+    <div class="stats">
+      <div class="stat"><b>${n}</b><span>jobs tracked</span></div>
+      <div class="stat"><b>${c.new || 0}</b><span>still to apply</span></div>
+      <div class="stat"><b>${applied}</b><span>applied</span></div>
+      <div class="stat"><b>${c.interview || 0}</b><span>interviewing</span></div>
+      <div class="stat"><b>${c.offer || 0}</b><span>offers</span></div>
+      <div class="stat"><b>${avg}%</b><span>average match</span></div>
+    </div>${n ? pipeline(c) : ""}
+    ${top.length ? `<h3>Best matches still to apply</h3><div class="list">${top.map(rowHtml).join("")}</div>
+    <p class="note">Ready to apply? Open the Find &amp; Apply tab and press "Start applying".</p>` : ""}`;
+}
+
+/* ---------- Jobs ---------- */
+const rowHtml = j => `<button class="row" data-u="${esc(j.apply_url)}">
+  <div class="score">${j.score}%</div>
+  <div><div class="title">${esc(j.title)}</div><div class="meta">${esc(j.company)}${j.location ? ", " + esc(j.location) : ""}</div></div>
+  <span class="pill" style="--c:${col(j.status)}">${label(j.status)}</span></button>`;
+
+function jobsView() {
+  $("#view").innerHTML = `<h2>Jobs</h2><p class="sub" id="jsub"></p><div id="jbar"></div>
+    <div class="tools"><input type="search" id="q" placeholder="Search role, company or city" aria-label="Search jobs">
+    <select id="sort" aria-label="Sort"><option value="score">Best match first</option><option value="updated">Recently updated</option><option value="company">Company A to Z</option></select></div>
+    <div class="list" id="jl"></div>`;
+  $("#q").oninput = $("#sort").onchange = renderList;
+  renderList();
+}
+function renderList() {
+  const c = counts(), q = ($("#q")?.value || "").trim().toLowerCase(), sort = $("#sort")?.value || "score";
+  $("#jbar").innerHTML = jobs.length ? pipeline(c) : "";
+  let list = jobs.filter(j => (filter === "all" || j.status === filter) &&
+    (!q || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q)));
+  list.sort((a, b) => sort === "company" ? a.company.localeCompare(b.company)
+    : sort === "updated" ? String(b.updated).localeCompare(String(a.updated)) : b.score - a.score);
+  $("#jsub").textContent = filter === "all" ? `${list.length} jobs` : `${list.length} jobs marked ${label(filter)} (click the bar again to clear)`;
+  $("#jl").innerHTML = list.length ? list.map(rowHtml).join("") : `<div class="empty">No jobs match. Try clearing the filter or run a new search.</div>`;
+}
+
+/* ---------- Job detail drawer ---------- */
+async function openJob(url) {
+  const j = jobs.find(x => x.apply_url === url); if (!j) return;
+  const dr = $("#dr");
+  dr.innerHTML = `<button class="btn ghost" id="close">Close</button>
+    <h2 style="margin-top:14px">${esc(j.title)}</h2><div class="meta">${esc(j.company)}</div>
+    <dl class="kv"><dt>Match</dt><dd><b>${j.score}%</b></dd>
+      <dt>Location</dt><dd>${esc(j.location)} ${esc(j.work_type)}</dd>
+      <dt>Level</dt><dd>${esc(j.level)} ${esc(j.type)}</dd>
+      <dt>Posted</dt><dd>${esc(j.posted)}</dd><dt>Applicants</dt><dd>${esc(j.applicants) || "unknown"}</dd>
+      <dt>Status</dt><dd><select id="st">${statuses.map(s => `<option value="${s}" ${s === j.status ? "selected" : ""}>${label(s)}</option>`).join("")}</select></dd></dl>
+    <p><a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Open application page</a>
+    ${j.job_url && j.job_url !== j.apply_url ? ` <a class="btn ghost" href="${esc(j.job_url)}" target="_blank" rel="noopener">Job post</a>` : ""}</p>
+    <h3>Your notes</h3><textarea id="nt" rows="3" placeholder="Recruiter name, follow-up date, interview details...">${esc(j.notes)}</textarea>
+    <span class="note" id="nts"></span>
+    <h3>Cover letter</h3><div class="box" id="cl">Loading...</div>
+    <p><button class="btn ghost" id="cp">Copy cover letter</button></p>
+    <h3>Job description</h3><div class="box">${esc(j.description) || "No description was captured for this job."}</div>`;
+  dr.classList.add("open");
+  $("#close").onclick = () => dr.classList.remove("open");
+  $("#st").onchange = async e => { try { await api("/api/status", {url, status: e.target.value}); j.status = e.target.value; refresh(); }
+    catch (err) { alert(err.message); } };
+  $("#nt").onchange = async e => { try { await api("/api/notes", {url, notes: e.target.value}); j.notes = e.target.value;
+    $("#nts").textContent = "Saved."; } catch (err) { $("#nts").textContent = err.message; } };
+  $("#cp").onclick = () => navigator.clipboard.writeText($("#cl").textContent).then(() => $("#cp").textContent = "Copied");
+  try { $("#cl").textContent = (await api("/api/letter?url=" + encodeURIComponent(url))).letter; }
+  catch (err) { $("#cl").textContent = err.message; }
+}
+document.addEventListener("keydown", e => e.key === "Escape" && $("#dr").classList.remove("open"));
+
+/* ---------- Search (run) ---------- */
+function runView() {
+  $("#view").innerHTML = `<h2>Find &amp; Apply</h2>
+    ${tokenSet ? "" : `<div class="banner">Add your Apify token in <a href="#" data-go="settings">Settings</a> first.</div>`}
+    <h3>1. Find jobs</h3>
+    <p class="sub">Searches for jobs that match your resume, scores them and adds the good ones to your list.</p>
+    <p><button class="btn" id="go" ${tokenSet ? "" : "disabled"}>Search for new jobs</button> <span class="note" id="rs"></span></p>
+    <pre class="log" id="lg">Nothing run yet.</pre>
+    <h3>2. Apply</h3>
+    <p class="sub">Opens a new window and a browser for each saved job. JobHunter fills in your details and uploads your resume. You check the form and submit it yourself.</p>
+    <p><button class="btn" id="ap">Start applying</button> <span class="note" id="am"></span></p>`;
+  $("#go").onclick = async () => { try { await api("/api/search", {}); pollRun(); } catch (e) { $("#rs").textContent = e.message; } };
+  $("#ap").onclick = async () => { try { $("#am").textContent = (await api("/api/apply", {})).message; } catch (e) { $("#am").textContent = e.message; } };
+  pollRun();
+}
+async function pollRun() {
+  clearTimeout(timer);
+  if (view !== "run") return;
+  const s = await api("/api/run").catch(() => null); if (!s) return;
+  $("#go").disabled = s.running || !tokenSet;
+  $("#lg").textContent = s.log.length ? s.log.join("\n") : "Nothing run yet.";
+  $("#lg").scrollTop = 1e9;
+  $("#rs").innerHTML = s.running ? "Running..." : s.code === null ? "" : s.code === 0 ? `<span class="ok">Finished.</span>` : `<span class="bad">Stopped with an error. Details are in the log.</span>`;
+  if (wasRunning && !s.running) await load();
+  wasRunning = s.running;
+  if (s.running) timer = setTimeout(pollRun, 1500);
+}
+
+/* ---------- Settings ---------- */
+async function settingsView() {
+  let d; try { d = await api("/api/settings"); } catch (e) { $("#view").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+  const s = d.settings, lv = {"1": "Internship", "2": "Entry level", "3": "Associate"};
+  $("#view").innerHTML = `<h2>Settings</h2><p class="sub">These apply to your next search. Your resume, contact details and apply mode are in <code>config.yaml</code>.</p>
+  <h3>Apify token</h3>
+  <div class="form"><p class="note">${d.token_set ? '<span class="ok">A token is saved.</span> Paste a new one below only if you want to replace it.' : 'Not set yet. Get yours at console.apify.com, Settings, API and integrations, then paste it here.'}</p>
+    <input type="password" id="tk" autocomplete="off" placeholder="apify_api_..." aria-label="Apify token">
+    <p><button class="btn" id="tks">Save token</button> <span class="note" id="tkm"></span></p></div>
+  <h3>Search preferences</h3>
+  <div class="form">
+    <label>Job titles to search <small>One per line</small><textarea id="s_t" rows="6">${esc(s.titles.join("\n"))}</textarea></label>
+    <label>Locations <small>One per line</small><textarea id="s_l" rows="3">${esc(s.locations.join("\n"))}</textarea></label>
+    <label>Posted within <select id="s_p">${[["r86400", "Last 24 hours"], ["r604800", "Last 7 days"], ["r2592000", "Last 30 days"]].map(([v, t]) =>
+      `<option value="${v}" ${v === s.posted_within ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    <label>Experience level <span class="checks" id="s_e">${Object.entries(lv).map(([v, t]) =>
+      `<label><input type="checkbox" value="${v}" ${s.experience_levels.includes(v) ? "checked" : ""}> ${t}</label>`).join("")}</span></label>
+    <label>Minimum match score <small>Jobs below this are ignored</small><input type="number" id="s_m" min="0" max="100" value="${s.min_score}"></label>
+    <label>Jobs to keep per search <input type="number" id="s_n" min="1" max="50" value="${s.top_n}"></label>
+    <p><button class="btn" id="save">Save settings</button> <span class="note" id="ss"></span></p>
+  </div>
+  <h3>Your profile</h3><p>${esc(d.profile.name)}, ${esc(d.profile.email)}, ${esc(d.profile.phone)}. Apply mode: <b>${esc(d.apply_mode)}</b></p>
+  <h3>Skills found in your resume (${d.skills.length})</h3><div class="chips">${d.skills.map(k => `<span class="chip">${esc(k)}</span>`).join("")}</div>`;
+  $("#tks").onclick = async () => {
+    try { await api("/api/token", {token: $("#tk").value}); tokenSet = true; $("#tk").value = "";
+      $("#tkm").innerHTML = `<span class="ok">Token saved.</span>`; } catch (e) { $("#tkm").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  };
+  $("#save").onclick = async () => {
+    const lines = id => $(id).value.split("\n");
+    try {
+      await api("/api/settings", {titles: lines("#s_t"), locations: lines("#s_l"), posted_within: $("#s_p").value,
+        experience_levels: [...document.querySelectorAll("#s_e input:checked")].map(x => x.value),
+        min_score: $("#s_m").value, top_n: $("#s_n").value});
+      $("#ss").innerHTML = `<span class="ok">Saved. Used from your next search.</span>`;
+    } catch (e) { $("#ss").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  };
+}
+
+/* ---------- shell ---------- */
+function refresh() { view === "overview" ? overview() : view === "jobs" ? renderList() : 0; }
+async function show(v) {
+  view = v; clearTimeout(timer);
+  document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === v));
+  if (v !== "run" && !(await load())) return;
+  ({overview, jobs: jobsView, run: runView, settings: settingsView})[v]();
+}
+document.addEventListener("click", e => {
+  const nav = e.target.closest("nav button"); if (nav) return show(nav.dataset.v);
+  const go = e.target.closest("[data-go]"); if (go) { e.preventDefault(); return show(go.dataset.go); }
+  const seg = e.target.closest("[data-f]"); if (seg) { filter = filter === seg.dataset.f ? "all" : seg.dataset.f;
+    if (view === "overview") return show("jobs"); return renderList(); }
+  const row = e.target.closest(".row"); if (row) openJob(row.dataset.u);
+});
+show("overview");
+</script>
+</body>
+</html>

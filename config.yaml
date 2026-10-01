@@ -1,0 +1,80 @@
+# ---------- Your profile (used for scoring + form autofill) ----------
+profile:
+  resume_path: data/resume.docx
+  full_name: Kondakindi Nithin Reddy
+  email: kondanithinreddy369@gmail.com
+  phone: "7993902873"
+  city: Hyderabad
+  state: Telangana
+  country: India
+  linkedin: ""          # add your profile URL
+  github: ""            # add your GitHub URL
+  notice_period: Immediate
+  graduation_year: "2026"
+  years_experience: "0"
+  cover_letter_template: |
+    Dear Hiring Team,
+
+    I am a CEH-certified Computer Science graduate applying for the {title} role at {company}.
+    I have hands-on experience in {skills} through a personal pentest lab, CTF competitions
+    (TryHackMe / Hack The Box) and Python scripts that automate vulnerability scans.
+    I would welcome the chance to contribute to your security team.
+
+    Regards,
+    {full_name}
+
+# ---------- What to search ----------
+search:
+  titles:
+    - Cybersecurity Analyst
+    - Penetration Tester
+    - Security Engineer
+    - SOC Analyst
+    - VAPT
+    - Information Security Analyst
+    - Application Security
+  locations: ["Hyderabad, Telangana, India", "India"]
+  posted_within: r604800        # r86400 = 24h, r604800 = 7d, r2592000 = 30d
+  experience_levels: ["1", "2"] # 1 = Internship, 2 = Entry level
+  rows_per_search: 10
+  preferred_locations: [hyderabad, telangana, remote]
+
+# ---------- Job sources (any Apify actor works: add "map" to translate field names) ----------
+sources:
+  - name: linkedin
+    enabled: true
+    actor: bebity/linkedin-jobs-scraper
+    input_template:               # {titles} {locations} etc. are filled from `search`
+      titles: "{titles}"
+      locations: "{locations}"
+      rows: "{rows}"
+      publishedAt: "{posted_within}"
+      experienceLevels: "{experience_levels}"
+      companyProfile: false
+  # Example for other boards. Check the actor's input schema on apify.com first.
+  - name: naukri
+    enabled: false
+    actor: REPLACE/naukri-actor
+    input_template: {}
+  - name: indeed
+    enabled: false
+    actor: REPLACE/indeed-actor
+    input_template: {}
+
+# ---------- Matching ----------
+matching:
+  min_score: 70                 # only jobs at/above this are kept & applied to
+  top_n: 10
+  exclude_title_words: [senior, lead, manager, principal, architect, director, head, sr]
+  max_years_experience: 2       # penalise descriptions asking for more
+  weights: {title: 30, skills: 30, level: 15, location: 10, recency: 10, competition: 5}
+
+# ---------- Applying ----------
+apply:
+  mode: assist                  # assist = fill form, YOU review + submit | auto = also click submit
+  max_per_run: 10
+  headless: false
+  delay_seconds: [20, 45]       # random pause between applications
+  # Sites that forbid automation: the tool only opens these for manual apply.
+  manual_only_domains: [linkedin.com, indeed.com, naukri.com, glassdoor.com]
+  browser_profile_dir: data/.browser_profile   # log in to sites once; session is kept here
