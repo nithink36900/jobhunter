@@ -50,6 +50,7 @@ pre.log{background:#0f1720;color:#cfe3ee;border-radius:8px;padding:14px;min-heig
 .form{display:grid;gap:14px;max-width:560px}.form label{display:grid;gap:4px;font-weight:600;font-size:14px}.form small{font-weight:400;color:var(--mute)}
 .checks{display:flex;gap:16px;font-weight:400}.checks label{display:flex;gap:6px;font-weight:400}
 .banner{background:color-mix(in srgb,var(--opened_manual) 14%,var(--panel));border:1px solid var(--opened_manual);border-radius:8px;padding:12px 14px;margin-bottom:18px}
+.star{color:#d49a00}.bars div{display:grid;grid-template-columns:90px 1fr 36px;gap:8px;align-items:center;font-size:13px;margin:3px 0}.bars i{display:block;height:12px;background:var(--accent);border-radius:3px;min-width:2px}.chip.gap{border-color:var(--rejected);color:var(--rejected)}.chip.have{border-color:var(--applied);color:var(--applied)}ul.q{margin:4px 0 0;padding-left:20px;font-size:13px}
 .note{color:var(--mute);font-size:13px}.ok{color:var(--applied)}.bad{color:var(--rejected)}
 </style>
 </head>
@@ -59,6 +60,7 @@ pre.log{background:#0f1720;color:#cfe3ee;border-radius:8px;padding:14px;min-heig
   <nav id="nav" role="tablist">
     <button data-v="overview" role="tab">Overview</button>
     <button data-v="jobs" role="tab">Jobs</button>
+    <button data-v="insights" role="tab">Insights</button>
     <button data-v="run" role="tab">Find &amp; Apply</button>
     <button data-v="settings" role="tab">Settings</button>
   </nav>
@@ -94,6 +96,11 @@ function pipeline(c) {
 }
 
 /* ---------- Overview ---------- */
+async function followBanner() {
+  try { const d = await api("/api/insights"); if (!d.followups.length || view !== "overview") return;
+    $("#fu").innerHTML = `<div class="banner"><b>${d.followups.length} follow-up${d.followups.length > 1 ? "s" : ""} due.</b> No reply yet:<ul class="q">${d.followups.slice(0, 5).map(f =>
+      `<li>${esc(f.title)} at ${esc(f.company)} (${f.days} days)</li>`).join("")}</ul></div>`; } catch (e) {}
+}
 function overview() {
   const c = counts(), n = jobs.length;
   const applied = jobs.filter(j => ["applied", "submitted_auto", "interview", "offer"].includes(j.status)).length;
@@ -101,6 +108,7 @@ function overview() {
   const top = jobs.filter(j => j.status === "new").slice(0, 5);
   $("#view").innerHTML = `<h2>Overview</h2>
     ${tokenSet ? "" : `<div class="banner"><b>One quick step first:</b> paste your Apify token in <a href="#" data-go="settings">Settings</a> so JobHunter can search for jobs.</div>`}
+    <div id="fu"></div>
     <p class="sub">${n ? "Where your applications stand." : "Nothing tracked yet. Open the Find &amp; Apply tab and run your first search."}</p>
     <div class="stats">
       <div class="stat"><b>${n}</b><span>jobs tracked</span></div>
@@ -112,29 +120,41 @@ function overview() {
     </div>${n ? pipeline(c) : ""}
     ${top.length ? `<h3>Best matches still to apply</h3><div class="list">${top.map(rowHtml).join("")}</div>
     <p class="note">Ready to apply? Open the Find &amp; Apply tab and press "Start applying".</p>` : ""}`;
+  followBanner();
 }
 
 /* ---------- Jobs ---------- */
 const rowHtml = j => `<button class="row" data-u="${esc(j.apply_url)}">
   <div class="score">${j.score}%</div>
-  <div><div class="title">${esc(j.title)}</div><div class="meta">${esc(j.company)}${j.location ? ", " + esc(j.location) : ""}</div></div>
+  <div><div class="title">${j.starred ? '<span class="star" title="Starred">&#9733;</span> ' : ""}${esc(j.title)}</div><div class="meta">${esc(j.company)}${j.location ? ", " + esc(j.location) : ""}${j.salary ? " &middot; " + esc(j.salary) : ""}</div></div>
   <span class="pill" style="--c:${col(j.status)}">${label(j.status)}</span></button>`;
 
 function jobsView() {
   $("#view").innerHTML = `<h2>Jobs</h2><p class="sub" id="jsub"></p><div id="jbar"></div>
     <div class="tools"><input type="search" id="q" placeholder="Search role, company or city" aria-label="Search jobs">
-    <select id="sort" aria-label="Sort"><option value="score">Best match first</option><option value="updated">Recently updated</option><option value="company">Company A to Z</option></select></div>
+    <select id="sort" aria-label="Sort"><option value="score">Best match first</option><option value="updated">Recently updated</option><option value="company">Company A to Z</option></select>
+    <label class="note" style="align-self:center"><input type="checkbox" id="sf"> Starred only</label>
+    <a class="btn ghost" href="/api/export" download>Export CSV</a></div>
+    <div class="tools"><span class="note" style="align-self:center">Mark all shown as</span><select id="bs" aria-label="Bulk status">${statuses.map(s => `<option value="${s}">${label(s)}</option>`).join("")}</select>
+    <button class="btn ghost" id="bg">Apply to shown</button><span class="note" id="bm" style="align-self:center"></span></div>
     <div class="list" id="jl"></div>`;
-  $("#q").oninput = $("#sort").onchange = renderList;
+  $("#q").oninput = $("#sort").onchange = $("#sf").onchange = renderList;
+  $("#bg").onclick = async () => {
+    const urls = shown.map(j => j.apply_url); if (!urls.length) return;
+    if (!confirm(`Change ${urls.length} job(s) to "${label($("#bs").value)}"?`)) return;
+    try { await api("/api/bulk", {urls, status: $("#bs").value}); await load(); renderList(); $("#bm").textContent = "Done."; }
+    catch (e) { $("#bm").textContent = e.message; } };
   renderList();
 }
+let shown = [];
 function renderList() {
   const c = counts(), q = ($("#q")?.value || "").trim().toLowerCase(), sort = $("#sort")?.value || "score";
   $("#jbar").innerHTML = jobs.length ? pipeline(c) : "";
   let list = jobs.filter(j => (filter === "all" || j.status === filter) &&
-    (!q || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q)));
+    (!q || `${j.title} ${j.company} ${j.location}`.toLowerCase().includes(q)) && (!$("#sf")?.checked || j.starred));
   list.sort((a, b) => sort === "company" ? a.company.localeCompare(b.company)
     : sort === "updated" ? String(b.updated).localeCompare(String(a.updated)) : b.score - a.score);
+  shown = list;
   $("#jsub").textContent = filter === "all" ? `${list.length} jobs` : `${list.length} jobs marked ${label(filter)} (click the bar again to clear)`;
   $("#jl").innerHTML = list.length ? list.map(rowHtml).join("") : `<div class="empty">No jobs match. Try clearing the filter or run a new search.</div>`;
 }
@@ -148,25 +168,54 @@ async function openJob(url) {
     <dl class="kv"><dt>Match</dt><dd><b>${j.score}%</b></dd>
       <dt>Location</dt><dd>${esc(j.location)} ${esc(j.work_type)}</dd>
       <dt>Level</dt><dd>${esc(j.level)} ${esc(j.type)}</dd>
-      <dt>Posted</dt><dd>${esc(j.posted)}</dd><dt>Applicants</dt><dd>${esc(j.applicants) || "unknown"}</dd>
+      <dt>Salary</dt><dd>${esc(j.salary) || "not listed"}</dd><dt>Posted</dt><dd>${esc(j.posted)}</dd><dt>Applicants</dt><dd>${esc(j.applicants) || "unknown"}</dd>
       <dt>Status</dt><dd><select id="st">${statuses.map(s => `<option value="${s}" ${s === j.status ? "selected" : ""}>${label(s)}</option>`).join("")}</select></dd></dl>
     <p><a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Open application page</a>
     ${j.job_url && j.job_url !== j.apply_url ? ` <a class="btn ghost" href="${esc(j.job_url)}" target="_blank" rel="noopener">Job post</a>` : ""}</p>
+    <p><button class="btn ghost" id="sb">${j.starred ? "&#9733; Starred" : "&#9734; Star this job"}</button></p>
+    <h3>Skill match</h3><div class="chips">${j.matched.map(k => `<span class="chip have" title="You have this">${esc(k)}</span>`).join("")}${j.missing.map(k => `<span class="chip gap" title="Asked for, not on your resume">${esc(k)}</span>`).join("") || (j.matched.length ? "" : '<span class="note">No known skills detected in this description.</span>')}</div>
     <h3>Your notes</h3><textarea id="nt" rows="3" placeholder="Recruiter name, follow-up date, interview details...">${esc(j.notes)}</textarea>
     <span class="note" id="nts"></span>
     <h3>Cover letter</h3><div class="box" id="cl">Loading...</div>
     <p><button class="btn ghost" id="cp">Copy cover letter</button></p>
-    <h3>Job description</h3><div class="box">${esc(j.description) || "No description was captured for this job."}</div>`;
+    <h3>Interview prep</h3><div id="pp" class="note">Loading...</div>
+    <h3>Job description</h3><div class="box" id="jd">Loading...</div>`;
   dr.classList.add("open");
   $("#close").onclick = () => dr.classList.remove("open");
   $("#st").onchange = async e => { try { await api("/api/status", {url, status: e.target.value}); j.status = e.target.value; refresh(); }
     catch (err) { alert(err.message); } };
   $("#nt").onchange = async e => { try { await api("/api/notes", {url, notes: e.target.value}); j.notes = e.target.value;
     $("#nts").textContent = "Saved."; } catch (err) { $("#nts").textContent = err.message; } };
+  $("#sb").onclick = async () => { try { j.starred = !j.starred; await api("/api/star", {url, starred: j.starred});
+    $("#sb").innerHTML = j.starred ? "&#9733; Starred" : "&#9734; Star this job"; } catch (err) { alert(err.message); } };
+  api("/api/job?url=" + encodeURIComponent(url)).then(d => {
+    $("#jd").textContent = d.description || "No description was captured for this job.";
+    const ul = a => `<ul class="q">${a.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+    $("#pp").innerHTML = (d.prep.technical.length ? `<b>Skills you have</b>${ul(d.prep.technical)}` : "") +
+      (d.prep.gaps.length ? `<b>Gaps to prepare</b>${ul(d.prep.gaps)}` : "") + `<b>General</b>${ul(d.prep.general)}`;
+  }).catch(err => { $("#jd").textContent = err.message; $("#pp").textContent = ""; });
   $("#cp").onclick = () => navigator.clipboard.writeText($("#cl").textContent).then(() => $("#cp").textContent = "Copied");
   try { $("#cl").textContent = (await api("/api/letter?url=" + encodeURIComponent(url))).letter; }
   catch (err) { $("#cl").textContent = err.message; }
 }
+/* ---------- Insights ---------- */
+async function insightsView() {
+  let d; try { d = await api("/api/insights"); } catch (e) { $("#view").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
+  const a = d.analytics, bars = (pairs, max = Math.max(1, ...pairs.map(p => p[1]))) =>
+    `<div class="bars">${pairs.map(([k, v]) => `<div><span>${esc(k)}</span><i style="width:${Math.round(100 * v / max)}%"></i><b>${v}</b></div>`).join("")}</div>`;
+  const none = '<p class="note">Nothing yet.</p>';
+  $("#view").innerHTML = `<h2>Insights</h2><p class="sub">What your search and applications look like so far.</p>
+    <div class="stats"><div class="stat"><b>${a.total}</b><span>jobs tracked</span></div><div class="stat"><b>${a.applied}</b><span>applied</span></div>
+    <div class="stat"><b>${a.response_rate}%</b><span>got a reply</span></div><div class="stat"><b>${a.avg_score}%</b><span>average match</span></div></div>
+    <h3>Follow-ups due (${d.followups.length})</h3>${d.followups.length ? `<div class="list">${d.followups.map(f => `<button class="row" data-u="${esc(f.apply_url)}">
+      <div class="score">${f.days}d</div><div><div class="title">${esc(f.title)}</div><div class="meta">${esc(f.company)}</div></div><span></span></button>`).join("")}</div>` : none}
+    <h3>Match score spread</h3>${a.total ? bars(Object.entries(a.score_buckets).filter(([, v]) => v)) : none}
+    <h3>Applications per week</h3>${a.per_week.length ? bars(a.per_week) : none}
+    <h3>Companies with most listings</h3>${a.top_companies.length ? bars(a.top_companies) : none}
+    <h3>Skills employers ask for most</h3>${a.top_demand.length ? bars(a.top_demand) : none}
+    <h3>Skills to add to your resume or learn</h3><p class="note">Asked for by your matched jobs but not found in your resume.</p>${a.resume_gaps.length ? bars(a.resume_gaps) : none}`;
+}
+
 document.addEventListener("keydown", e => e.key === "Escape" && $("#dr").classList.remove("open"));
 
 /* ---------- Search (run) ---------- */
@@ -241,7 +290,7 @@ async function show(v) {
   view = v; clearTimeout(timer);
   document.querySelectorAll("nav button").forEach(b => b.setAttribute("aria-selected", b.dataset.v === v));
   if (v !== "run" && !(await load())) return;
-  ({overview, jobs: jobsView, run: runView, settings: settingsView})[v]();
+  ({overview, jobs: jobsView, insights: insightsView, run: runView, settings: settingsView})[v]();
 }
 document.addEventListener("click", e => {
   const nav = e.target.closest("nav button"); if (nav) return show(nav.dataset.v);

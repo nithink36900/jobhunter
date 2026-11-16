@@ -70,6 +70,41 @@ def resume_skills(text):
     return sorted({s for s in SKILL_VOCAB if _term_rx(s).search(low)})
 
 
+def job_terms(text):
+    """Skills from the vocabulary that a job description asks for."""
+    low = (text or "").lower()
+    return [s for s in SKILL_VOCAB if _term_rx(s).search(low)]
+
+
+_U = r"(?:lpa|lakhs?|lacs?|million|k|l|m)\b"
+_N = r"\d[\d,]*(?:\.\d+)?"
+_C = r"(?:₹|rs\.?|inr|\$|usd|€|£)"
+_SAL_RX = re.compile(
+    rf"(?:(?<![a-z]){_C}\s?{_N}(?:\s?{_U})?(?:\s?(?:-|–|to)\s?(?:{_C}\s?)?{_N}(?:\s?{_U})?)?"
+    rf"|{_N}(?:\s?(?:-|–|to)\s?{_N})?\s?(?:lpa|lakhs?|lacs?)\b(?:\s?per\s?annum)?)"
+    rf"(?:\s?(?:/|per|a)\s?(?:year|yr|annum|month|mo|hour|hr)\b)?", re.I)
+
+
+def extract_salary(text):
+    """First plausible pay figure in a description ('Rs. 4-6 LPA', '$80,000 a year'), else ''."""
+    for m in _SAL_RX.finditer(text or ""):
+        s = " ".join(m.group(0).split())
+        nums = [float(n.replace(",", "")) for n in re.findall(_N, s)]
+        has_unit = re.search(r"(?:lpa|lakh|lac|million)|\d\s?[klm]\b", s, re.I)
+        if nums and (has_unit or max(nums) >= 10000):
+            return s
+    return ""
+
+
+def annotate(job, have):
+    """Attach matched/missing skills and any salary found, so the app can show why a job scored as it did."""
+    terms = job_terms(job.get("description"))
+    job["matched"] = [s for s in terms if s in have]
+    job["missing"] = [s for s in terms if s not in have]
+    job["salary"] = extract_salary(job.get("description"))
+    return job
+
+
 # ------------------------------ fetching ------------------------------
 def _fill(template, values):
     """Replace '{key}' strings with real values (keeps lists/ints as-is)."""
@@ -257,16 +292,24 @@ def score_job(job, cfg, skills):
 
 
 def rank(jobs, cfg, skills):
+    mt = cfg["matching"]
+    bad_co = [c.lower() for c in mt.get("exclude_companies") or []]
+    bad_kw = [k.lower() for k in mt.get("exclude_keywords") or []]
     for j in jobs:
-        j["score"], j["note"] = score_job(j, cfg, skills)
+        blob = f"{j['title']} {j['description']}".lower()
+        if any(c in j["company"].lower() for c in bad_co) or any(_term_rx(k).search(blob) for k in bad_kw):
+            j["score"], j["note"] = 0, "blocked"  # company or keyword blocklist from config.yaml
+        else:
+            j["score"], j["note"] = score_job(j, cfg, skills)
     seen, out = set(), []
     for j in sorted(jobs, key=lambda x: -x["score"]):
         key = (j["title"].lower(), j["company"].lower(), j["location"].lower())
-        if key in seen or j["score"] < cfg["matching"]["min_score"]:
+        if key in seen or j["score"] < mt["min_score"]:
             continue
         seen.add(key)
         out.append(j)
-    return out[: cfg["matching"]["top_n"]]
+    have = set(skills)
+    return [annotate(j, have) for j in out[: mt["top_n"]]]
 
 
 # ------------------------------ tracking ------------------------------
@@ -274,8 +317,10 @@ def ensure_schema(db):
     db.execute("""CREATE TABLE IF NOT EXISTS jobs(
         apply_url TEXT PRIMARY KEY, title TEXT, company TEXT, score INT,
         status TEXT DEFAULT 'new', data TEXT, updated TEXT)""")
-    if "notes" not in [r[1] for r in db.execute("PRAGMA table_info(jobs)")]:
-        db.execute("ALTER TABLE jobs ADD COLUMN notes TEXT DEFAULT ''")
+    have = [r[1] for r in db.execute("PRAGMA table_info(jobs)")]
+    for col, ddl in (("notes", "TEXT DEFAULT ''"), ("starred", "INT DEFAULT 0")):
+        if col not in have:
+            db.execute(f"ALTER TABLE jobs ADD COLUMN {col} {ddl}")
     db.commit()
 
 
@@ -283,17 +328,21 @@ class Tracker:
     def __init__(self, path="data/jobs.db"):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self.db = sqlite3.connect(path)
+        self.last_new = []
         ensure_schema(self.db)
 
     def save(self, jobs):
         new = 0
+        self.last_new = []  # jobs first seen in this save (used for notifications)
         known = {r[0] for r in self.db.execute("SELECT apply_url FROM jobs")}  # one query, not one per job
         for j in jobs:
             if j["apply_url"] in known:
-                self.db.execute("UPDATE jobs SET score=? WHERE apply_url=?", (j["score"], j["apply_url"]))
+                self.db.execute("UPDATE jobs SET score=?, data=? WHERE apply_url=?",
+                                (j["score"], json.dumps(j), j["apply_url"]))  # refresh skills/salary too
             else:
                 known.add(j["apply_url"])
                 new += 1
+                self.last_new.append(j)
                 self.db.execute("INSERT INTO jobs(apply_url,title,company,score,status,data,updated) VALUES(?,?,?,?,?,?,?)",
                                 (j["apply_url"], j["title"], j["company"], j["score"], "new",
                                  json.dumps(j), datetime.now().isoformat()))

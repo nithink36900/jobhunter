@@ -10,6 +10,15 @@ See **READ ME FIRST.txt** for the step-by-step version.
 
 ---
 
+## Features
+- Resume-based scoring with whole-word skill matching, senior-title filter, company and keyword blocklists
+- Skill gap per job (skills you have vs. asked for), salary detection, resume-gap summary
+- Web app: jobs list, search, sort, star, bulk status change, notes, cover letter, interview prep questions
+- Insights tab: score spread, applications per week, reply rate, top companies, in-demand skills
+- Follow-up reminders for applications with no reply after `followup_days`
+- Alerts for new matches via Telegram or Slack/Discord webhook (`notify` in config.yaml)
+- CSV export (`python run.py export` or the Export button), auto-repeat search (`python run.py watch --every 6`)
+
 ## Project layout
 ```
 jobhunter/
@@ -23,6 +32,8 @@ jobhunter/
 ├── app/                code (no need to touch)
 │   ├── cli.py          commands
 │   ├── core.py         resume parsing, Apify fetch, scoring, tracker
+│   ├── insights.py     analytics, follow-ups, interview prep
+│   ├── notify.py       Telegram / webhook alerts
 │   ├── applier.py      browser autofill / apply
 │   └── dashboard/      server.py + index.html (the web app)
 └── data/               your files and everything the tool creates

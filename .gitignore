@@ -7,3 +7,4 @@ __pycache__/
 *.pyc
 data/settings.json
 .venv/
+data/all_jobs.csv

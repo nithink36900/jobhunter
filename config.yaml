@@ -67,6 +67,9 @@ matching:
   top_n: 10
   exclude_title_words: [senior, lead, manager, principal, architect, director, head, sr]
   max_years_experience: 2       # penalise descriptions asking for more
+  exclude_companies: []         # e.g. [acme, some staffing firm]  (jobs from these are dropped)
+  exclude_keywords: []          # e.g. [unpaid, commission only, night shift]
+  followup_days: 7              # applied jobs with no update after this many days show as reminders
   weights: {title: 30, skills: 30, level: 15, location: 10, recency: 10, competition: 5}
 
 # ---------- Applying ----------
@@ -78,3 +81,16 @@ apply:
   # Sites that forbid automation: the tool only opens these for manual apply.
   manual_only_domains: [linkedin.com, indeed.com, naukri.com, glassdoor.com]
   browser_profile_dir: data/.browser_profile   # log in to sites once; session is kept here
+
+# ---------- Alerts for new matches (optional) ----------
+# Telegram: make a bot with @BotFather, send it a message, then put the token + your chat id below
+# (or in .env as TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID). webhook_url works with Slack and Discord.
+notify:
+  enabled: false
+  webhook_url: ""
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+
+# ---------- Auto-repeat search (python run.py watch) ----------
+watch:
+  interval_hours: 6

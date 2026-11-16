@@ -13,7 +13,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-from .. import core
+from .. import core, insights
+from ..cli import export_all
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -36,12 +37,13 @@ def query(db_path, sql, args=()):
 
 def list_jobs(db_path):
     out = []
-    for r in query(db_path, "SELECT apply_url,title,company,score,status,updated,notes,data FROM jobs ORDER BY score DESC"):
+    for r in query(db_path, "SELECT apply_url,title,company,score,status,updated,notes,starred,data FROM jobs ORDER BY score DESC"):
         d = json.loads(r.pop("data") or "{}")
         r.update({"location": d.get("location", ""), "level": d.get("level", ""), "work_type": d.get("work_type", ""),
                   "type": d.get("type", ""), "posted": d.get("posted", ""), "applicants": d.get("applicants", ""),
                   "source": d.get("source", ""), "job_url": d.get("job_url", ""),
-                  "description": (d.get("description") or "")[:6000], "notes": r["notes"] or ""})
+                  "matched": d.get("matched", []), "missing": d.get("missing", []), "salary": d.get("salary", ""),
+                  "starred": bool(r["starred"]), "notes": r["notes"] or ""})  # descriptions load on demand (/api/job)
         out.append(r)
     return out
 
@@ -116,6 +118,20 @@ def get_settings():
             "apply_mode": cfg["apply"]["mode"], "token_set": core.token_present()}
 
 
+def job_detail(db_path, url):
+    rows = query(db_path, "SELECT data FROM jobs WHERE apply_url=?", (url,))
+    if not rows:
+        raise ValueError("Job not found.")
+    d = json.loads(rows[0]["data"] or "{}")
+    return {"description": (d.get("description") or "")[:6000], "prep": insights.prep_questions(d)}
+
+
+def insight_data(db_path):
+    js = list_jobs(db_path)
+    days = core.load_cfg()["matching"].get("followup_days", 7)
+    return {"analytics": insights.analytics(js), "followups": insights.followups(js, days)}
+
+
 def letter_for(db_path, url):
     rows = query(db_path, "SELECT data FROM jobs WHERE apply_url=?", (url,))
     if not rows:
@@ -129,12 +145,14 @@ def letter_for(db_path, url):
 # ------------------------------ http ------------------------------
 def make_handler(db_path):
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, code, body, ctype="application/json"):
+        def _send(self, code, body, ctype="application/json", headers=None):
             data = body if isinstance(body, bytes) else (body if isinstance(body, str) else json.dumps(body)).encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype + "; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
+            for k, v in (headers or {}).items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
 
@@ -152,6 +170,15 @@ def make_handler(db_path):
                     return self._send(200, run_state())
                 if u.path == "/api/settings":
                     return self._send(200, get_settings())
+                if u.path == "/api/job":
+                    return self._send(200, job_detail(db_path, parse_qs(u.query)["url"][0]))
+                if u.path == "/api/insights":
+                    return self._send(200, insight_data(db_path))
+                if u.path == "/api/export":
+                    tmp = os.path.join(ROOT, "data", "all_jobs.csv")
+                    export_all(db_path, tmp)
+                    with open(tmp, "rb") as f:
+                        return self._send(200, f.read(), "text/csv", {"Content-Disposition": 'attachment; filename="jobhunter_jobs.csv"'})
                 if u.path == "/api/letter":
                     return self._send(200, {"letter": letter_for(db_path, parse_qs(u.query)["url"][0])})
                 if u.path in ("/", "/index.html"):
@@ -172,6 +199,14 @@ def make_handler(db_path):
                     if b["status"] not in STATUSES:
                         raise ValueError("Unknown status.")
                     query(db_path, "UPDATE jobs SET status=?, updated=datetime('now') WHERE apply_url=?", (b["status"], b["url"]))
+                elif self.path == "/api/star":
+                    query(db_path, "UPDATE jobs SET starred=? WHERE apply_url=?", (1 if b["starred"] else 0, b["url"]))
+                elif self.path == "/api/bulk":
+                    if b["status"] not in STATUSES:
+                        raise ValueError("Unknown status.")
+                    urls = [str(u) for u in b["urls"]][:500]
+                    query(db_path, f"UPDATE jobs SET status=?, updated=datetime('now') WHERE apply_url IN ({','.join('?' * len(urls))})",
+                          (b["status"], *urls)) if urls else None
                 elif self.path == "/api/notes":
                     query(db_path, "UPDATE jobs SET notes=?, updated=datetime('now') WHERE apply_url=?", (str(b["notes"])[:5000], b["url"]))
                 elif self.path == "/api/search":
