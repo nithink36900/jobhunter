@@ -49,15 +49,36 @@ sources:
       publishedAt: "{posted_within}"
       experienceLevels: "{experience_levels}"
       companyProfile: false
-  # Example for other boards. Check the actor's input schema on apify.com first.
+  # These two take ONE keyword per run, so JobHunter runs them once per title (first max_titles titles).
+  # Each run costs a fraction of a cent on your Apify account. Set enabled: false to skip a source.
   - name: naukri
-    enabled: false
-    actor: REPLACE/naukri-actor
-    input_template: {}
+    enabled: true
+    actor: valig/naukri-jobs-scraper
+    max_titles: 3
+    locations: [Hyderabad]        # Naukri wants a city, not "City, State, Country"
+    input_template:
+      keywords: "{title}"
+      location: "{location}"
+      jobAge: "{days}"
+      experience: "{years}"
+      sort: f
+      limit: "{rows}"
   - name: indeed
-    enabled: false
-    actor: REPLACE/indeed-actor
-    input_template: {}
+    enabled: true
+    actor: valig/indeed-jobs-scraper
+    max_titles: 3
+    locations: [Hyderabad]
+    input_template:
+      country: in
+      title: "{title}"
+      location: "{location}"
+      datePosted: "{days14}"      # Indeed only offers 1, 3, 7 or 14 days
+      limit: "{rows}"
+
+# ---------- Your own words (optional): not in cybersecurity? add your field's skills here ----------
+vocabulary:
+  skills: []                      # e.g. [react, sql, docker]
+  role_words: []                  # e.g. [developer, frontend, data]
 
 # ---------- Matching ----------
 matching:

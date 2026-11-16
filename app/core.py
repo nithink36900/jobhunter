@@ -22,6 +22,15 @@ ROLE_WORDS = ["security", "cyber", "soc", "vapt", "pentest", "penetration", "inf
 
 
 # ------------------------------ config ------------------------------
+def _apply_vocab(v):
+    """config.yaml 'vocabulary:' adds your own skills and role words, so the tool is not tied to one field."""
+    for lst, extra in ((SKILL_VOCAB, (v or {}).get("skills")), (ROLE_WORDS, (v or {}).get("role_words"))):
+        for w in extra or []:
+            w = str(w).strip().lower()
+            if w and w not in lst:
+                lst.append(w)
+
+
 def _merge(base, over):
     for k, v in over.items():
         base[k] = _merge(base[k], v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
@@ -59,10 +68,14 @@ def validate_cfg(cfg):
 def load_cfg(path="config.yaml", settings="data/settings.json"):
     """config.yaml, with anything saved from the web Settings page laid on top."""
     import yaml
-    cfg = yaml.safe_load(open(path, encoding="utf-8"))
+    with open(path, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    _apply_vocab(cfg.get("vocabulary"))
     local = os.path.join(os.path.dirname(path) or ".", "config.local.yaml")  # private values; git-ignored
     if os.path.exists(local):
-        cfg = _merge(cfg, yaml.safe_load(open(local, encoding="utf-8")) or {})
+        with open(local, encoding="utf-8") as f:
+            cfg = _merge(cfg, yaml.safe_load(f) or {})
+        _apply_vocab(cfg.get("vocabulary"))
     if os.path.exists(settings):
         try:
             ov = json.load(open(settings, encoding="utf-8"))
@@ -138,7 +151,7 @@ def annotate(job, have):
     terms = job_terms(job.get("description"))
     job["matched"] = [s for s in terms if s in have]
     job["missing"] = [s for s in terms if s not in have]
-    job["salary"] = extract_salary(job.get("description"))
+    job["salary"] = extract_salary(job.get("description")) or job.get("pay", "")
     return job
 
 
@@ -167,20 +180,50 @@ def canon_url(url):
     return urlunparse(u._replace(query=urlencode(q), fragment=""))
 
 
+def _dig(item, key):
+    """item['a.b'] or item['a']['b'] (actors return either flat dotted keys or nested objects)."""
+    if key in item:
+        return item[key]
+    cur = item
+    for part in key.split("."):
+        cur = cur.get(part) if isinstance(cur, dict) else None
+    return cur
+
+
+def _salary_text(item):
+    lab = _dig(item, "salary.label")
+    if isinstance(lab, str) and lab.strip() and "not disclosed" not in lab.lower():
+        return lab.strip()
+    lo, hi = _dig(item, "baseSalary.min"), _dig(item, "baseSalary.max")
+    if lo or hi:
+        cur, unit = _dig(item, "baseSalary.currencyCode") or "", (_dig(item, "baseSalary.unitOfWork") or "").lower()
+        return f"{cur} {lo or ''}-{hi or ''}".replace(" -", " ").rstrip("-").strip() + (f" per {unit}" if unit else "")
+    return ""
+
+
 def normalise(item):
-    g = lambda *ks: next((item[k] for k in ks if item.get(k)), "")
+    def g(*ks):  # first non-empty plain value (skips objects/lists so a 'location' dict cannot leak through)
+        for k in ks:
+            v = _dig(item, k)
+            if isinstance(v, (str, int, float)) and not isinstance(v, bool) and v not in ("", None):
+                return v
+        return ""
+    locs = item.get("locations")
+    loc_list = ", ".join(x.get("label", "") for x in locs if isinstance(x, dict) and x.get("label")) if isinstance(locs, list) else ""
+    desc = g("description", "descriptionText", "jobDescription", "description.full", "description.text", "description.short")
     return {
         "title": g("title", "jobTitle", "positionName", "name"),
-        "company": g("companyName", "company", "companyname"),
-        "location": g("location", "jobLocation", "city"),
-        "posted": g("postedTime", "postedAt", "postingDateParsed", "publishedAt", "datePosted"),
+        "company": g("companyName", "company", "companyname", "company.name", "employer.name"),
+        "location": g("location", "jobLocation", "city", "location.city", "location.countryName") or loc_list,
+        "pay": _salary_text(item),
+        "posted": g("postedTime", "postedAt", "postingDateParsed", "publishedAt", "datePosted", "createdDateText", "datePublished", "dateOnIndeed"),
         "job_url": canon_url(g("jobUrl", "url", "link", "jobLink")),
         "apply_url": canon_url(g("applyUrl", "externalApplyLink", "applyLink", "jobUrl", "url", "link")),
-        "level": g("experienceLevel", "seniority", "experience"),
+        "level": g("experienceLevel", "seniority", "experience", "experience.text"),
         "type": g("contractType", "employmentType", "jobType"),
         "work_type": g("workType", "workplaceType"),
-        "applicants": g("applicationsCount", "applicants"),
-        "description": g("description", "descriptionText", "jobDescription"),
+        "applicants": g("applicationsCount", "applicants", "applyCount"),
+        "description": desc,
     }
 
 
@@ -236,28 +279,44 @@ def _dataset_id(run):
     raise RuntimeError("Could not read the results id from Apify's reply.")
 
 
+def _runs(src, values, s):
+    """Actors that take {title}/{location} (one keyword per run) are run once per title and location."""
+    if not re.search(r"\{(title|location)\}", json.dumps(src.get("input_template") or {})):
+        return [values]
+    titles = s["titles"][: src.get("max_titles", 3)]
+    locs = (src.get("locations") or s["locations"])[: src.get("max_locations", 1)]
+    return [{**values, "title": t, "location": loc} for t in titles for loc in locs]
+
+
 def fetch_jobs(cfg, token=None, log=print):
     token = get_apify_token(token)  # check the token first, so a missing one gives a clear message
     from apify_client import ApifyClient
     client = ApifyClient(token)
     s = cfg["search"]
+    days = {"r86400": 1, "r604800": 7, "r2592000": 30}.get(s["posted_within"], 7)
+    try:
+        years = int(float(cfg["profile"].get("years_experience") or 0))
+    except (TypeError, ValueError):
+        years = 0
     values = {"titles": s["titles"], "locations": s["locations"], "rows": s["rows_per_search"],
-              "posted_within": s["posted_within"], "experience_levels": s["experience_levels"]}
+              "posted_within": s["posted_within"], "experience_levels": s["experience_levels"],
+              "days": str(days), "days14": str(min(days, 14)), "years": years}
     jobs, errors = [], []
     for src in cfg["sources"]:
         if not src.get("enabled"):
             continue
         log(f"[fetch] {src['name']} via {src['actor']} ...")
-        try:  # one broken source must not throw away what the others found
-            run = client.actor(src["actor"]).call(run_input=_fill(src["input_template"], values))
-            for it in client.dataset(_dataset_id(run)).iterate_items():
-                j = normalise(it)
-                j["source"] = src["name"]
-                if j["title"] and j["apply_url"]:
-                    jobs.append(j)
-        except Exception as e:
-            errors.append(f"{src['name']}: {e}")
-            log(f"[fetch] {src['name']} failed: {e}")
+        for vals in _runs(src, values, s):  # one run, or one per title/location for single-keyword actors
+            try:  # one broken run must not throw away what the others found
+                run = client.actor(src["actor"]).call(run_input=_fill(src["input_template"], vals))
+                for it in client.dataset(_dataset_id(run)).iterate_items():
+                    j = normalise(it)
+                    j["source"] = src["name"]
+                    if j["title"] and j["apply_url"]:
+                        jobs.append(j)
+            except Exception as e:
+                errors.append(f"{src['name']}: {e}")
+                log(f"[fetch] {src['name']} failed: {e}")
         log(f"[fetch] {src['name']}: {len(jobs)} total so far")
     if errors and not jobs:
         raise RuntimeError("All job sources failed. " + " | ".join(errors))
@@ -317,6 +376,9 @@ def score_parts(job, cfg, skills):
         lv = w["level"] * 0.5
     else:
         lv = w["level"] * 0.2
+    em = re.search(r"(\d+)\s*(?:-|to)\s*\d+\s*y", lvl)
+    if em:  # Naukri style "0-2 Yrs": judged by the minimum asked for
+        lv = w["level"] if int(em.group(1)) <= mt["max_years_experience"] else w["level"] * 0.2
     yrs = [int(x) for x in re.findall(r"(\d+)\+?\s*(?:-\s*\d+\s*)?years", desc)]
     if yrs and min(yrs) > mt["max_years_experience"]:
         lv *= 0.3
