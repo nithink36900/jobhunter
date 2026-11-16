@@ -1,11 +1,11 @@
-# ---------- Your profile (used for scoring + form autofill) ----------
+# ---------- Your profile: placeholders only. Put REAL details in config.local.yaml (git-ignored) ----------
 profile:
   resume_path: data/resume.docx
   full_name: YOUR NAME
   email: you@example.com
   phone: "0000000000"
-  city: Hyderabad
-  state: Telangana
+  city: YourCity
+  state: YourState
   country: India
   linkedin: ""          # add your profile URL
   github: ""            # add your GitHub URL
@@ -15,10 +15,8 @@ profile:
   cover_letter_template: |
     Dear Hiring Team,
 
-    I am a CEH-certified Computer Science graduate applying for the {title} role at {company}.
-    I have hands-on experience in {skills} through a personal pentest lab, CTF competitions
-    (TryHackMe / Hack The Box) and Python scripts that automate vulnerability scans.
-    I would welcome the chance to contribute to your security team.
+    I am applying for the {title} role at {company}. I have hands-on experience in {skills}.
+    I would welcome the chance to contribute to your team.
 
     Regards,
     {full_name}
@@ -74,6 +72,7 @@ matching:
 
 # ---------- Applying ----------
 apply:
+  confirm_auto: true            # in auto mode, ask y/n before every submit
   mode: assist                  # assist = fill form, YOU review + submit | auto = also click submit
   max_per_run: 10
   headless: false

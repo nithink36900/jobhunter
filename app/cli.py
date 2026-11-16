@@ -114,6 +114,8 @@ def main():
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     os.chdir(ROOT)  # all paths in config.yaml are relative to the project folder
     cfg, tracker = core.load_cfg(a.config), core.Tracker(os.path.join(DATA, "jobs.db"))
+    if a.command in ("search", "apply", "run", "watch"):
+        core.validate_cfg(cfg)
     if a.command in ("search", "run"):
         skills = do_search(cfg, tracker, a.offline)
     if a.command == "apply":

@@ -1,0 +1,2 @@
+Replace this with your resume: save it as data/resume.docx (or .pdf / .txt).
+Skills: python, linux, nmap, wireshark, vapt

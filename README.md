@@ -19,6 +19,11 @@ See **READ ME FIRST.txt** for the step-by-step version.
 - Alerts for new matches via Telegram or Slack/Discord webhook (`notify` in config.yaml)
 - CSV export (`python run.py export` or the Export button), auto-repeat search (`python run.py watch --every 6`)
 
+## Private details and tests
+Your name, contact details and resume stay on your computer: copy `config.local.example.yaml` to `config.local.yaml` and fill it in. Both that file and `data/resume.*` are git-ignored.
+Run the tests with `python -m unittest discover -s tests`. They also run on every push through GitHub Actions.
+In `auto` apply mode, `apply.confirm_auto: true` asks y/n before each submit.
+
 ## Project layout
 ```
 jobhunter/
@@ -26,7 +31,8 @@ jobhunter/
 ├── start.sh              same for Mac / Linux
 ├── READ ME FIRST.txt     plain-language steps
 ├── run.py                command-line entry point (the launchers call this)
-├── config.yaml         the ONLY file you edit (profile, search, matching, apply)
+├── config.yaml         search, matching and apply settings (shared, no personal data)
+├── config.local.yaml   YOUR name, email, phone, cover letter (private, git-ignored; copy from config.local.example.yaml)
 ├── requirements.txt
 ├── .env.example        copy to .env to save your Apify token (optional)
 ├── app/                code (no need to touch)
@@ -37,7 +43,7 @@ jobhunter/
 │   ├── applier.py      browser autofill / apply
 │   └── dashboard/      server.py + index.html (the web app)
 └── data/               your files and everything the tool creates
-    ├── resume.docx     your resume (replace with your own; .pdf also works)
+    ├── resume.docx     your resume (git-ignored, never uploaded; .pdf/.txt also work)
     ├── sample_jobs.json  test data
     ├── jobs.db, settings.json, matches.csv, matches.md, letters/   (created as you use it)
 ```

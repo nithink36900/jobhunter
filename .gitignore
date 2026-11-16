@@ -8,3 +8,6 @@ __pycache__/
 data/settings.json
 .venv/
 data/all_jobs.csv
+config.local.yaml
+data/resume.*
+!data/resume.example.txt

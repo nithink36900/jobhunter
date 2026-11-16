@@ -42,7 +42,7 @@ def list_jobs(db_path):
         r.update({"location": d.get("location", ""), "level": d.get("level", ""), "work_type": d.get("work_type", ""),
                   "type": d.get("type", ""), "posted": d.get("posted", ""), "applicants": d.get("applicants", ""),
                   "source": d.get("source", ""), "job_url": d.get("job_url", ""),
-                  "matched": d.get("matched", []), "missing": d.get("missing", []), "salary": d.get("salary", ""),
+                  "matched": d.get("matched", []), "missing": d.get("missing", []), "salary": d.get("salary", ""), "breakdown": d.get("breakdown", {}),
                   "starred": bool(r["starred"]), "notes": r["notes"] or ""})  # descriptions load on demand (/api/job)
         out.append(r)
     return out

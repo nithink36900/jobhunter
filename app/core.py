@@ -22,10 +22,47 @@ ROLE_WORDS = ["security", "cyber", "soc", "vapt", "pentest", "penetration", "inf
 
 
 # ------------------------------ config ------------------------------
+def _merge(base, over):
+    for k, v in over.items():
+        base[k] = _merge(base[k], v) if isinstance(v, dict) and isinstance(base.get(k), dict) else v
+    return base
+
+
+def validate_cfg(cfg):
+    """Fail early with a plain message instead of a crash half-way through a run."""
+    errs = []
+    for sec in ("profile", "search", "sources", "matching", "apply"):
+        if sec not in cfg:
+            errs.append(f"config.yaml is missing the '{sec}' section")
+    if errs:
+        raise SystemExit("\n".join(errs))
+    p, m = cfg["profile"], cfg["matching"]
+    if not os.path.exists(p.get("resume_path", "")):
+        errs.append(f"Resume not found at '{p.get('resume_path')}'. Put your resume there (.docx, .pdf or .txt).")
+    if not str(p.get("full_name", "")).strip() or "YOUR" in str(p.get("full_name", "")).upper():
+        errs.append("Set your name: copy config.local.example.yaml to config.local.yaml and fill it in.")
+    w = m.get("weights", {})
+    if set(w) != {"title", "skills", "level", "location", "recency", "competition"} or any(v < 0 for v in w.values()):
+        errs.append("matching.weights needs title, skills, level, location, recency and competition (none negative).")
+    elif sum(w.values()) != 100:
+        errs.append(f"matching.weights should add up to 100 (they add up to {sum(w.values())}).")
+    if not 0 <= m.get("min_score", -1) <= 100:
+        errs.append("matching.min_score must be between 0 and 100.")
+    if not cfg["search"].get("titles") or not cfg["search"].get("locations"):
+        errs.append("search.titles and search.locations cannot be empty.")
+    if cfg["apply"].get("mode") not in ("assist", "auto"):
+        errs.append("apply.mode must be 'assist' or 'auto'.")
+    if errs:
+        raise SystemExit("Fix these in config.yaml / config.local.yaml:\n - " + "\n - ".join(errs))
+
+
 def load_cfg(path="config.yaml", settings="data/settings.json"):
     """config.yaml, with anything saved from the web Settings page laid on top."""
     import yaml
     cfg = yaml.safe_load(open(path, encoding="utf-8"))
+    local = os.path.join(os.path.dirname(path) or ".", "config.local.yaml")  # private values; git-ignored
+    if os.path.exists(local):
+        cfg = _merge(cfg, yaml.safe_load(open(local, encoding="utf-8")) or {})
     if os.path.exists(settings):
         try:
             ov = json.load(open(settings, encoding="utf-8"))
@@ -230,6 +267,13 @@ def fetch_jobs(cfg, token=None, log=print):
 # ------------------------------ scoring ------------------------------
 def _age_hours(posted):
     p = str(posted).lower()
+    d = re.match(r"\d{4}-\d{2}-\d{2}", p)
+    if d:  # absolute date such as 2026-11-16 or 2026-11-16T09:30:00Z
+        try:
+            t = datetime.fromisoformat(p[:19].replace("z", ""))
+            return max(0.0, (datetime.now() - t).total_seconds() / 3600)
+        except ValueError:
+            pass
     m = re.search(r"(\d+)\s*(minute|hour|day|week|month)", p)
     if not m:
         return 72
@@ -244,7 +288,7 @@ def _applicants(txt):
     return int(m.group(1)) if m else 100
 
 
-def score_job(job, cfg, skills):
+def score_parts(job, cfg, skills):
     w, mt = cfg["matching"]["weights"], cfg["matching"]
     title, desc = job["title"].lower(), job["description"].lower()
     loc = f"{job['location']} {job['work_type']}".lower()
@@ -252,7 +296,7 @@ def score_job(job, cfg, skills):
     # title: role keywords + closeness to searched titles; excluded words kill the score
     entry_title = re.search(r"trainee|intern|junior|fresher|entry|graduate", title)
     if not entry_title and any(_term_rx(x.lower()).search(title) for x in mt["exclude_title_words"]):
-        return 0, "senior title"
+        return {}, "senior title"
     hits = sum(bool(_stem_rx(k).search(title)) for k in ROLE_WORDS)
     wanted = max((len(set(title.split()) & set(t.lower().split())) / len(t.split())
                   for t in cfg["search"]["titles"]), default=0)
@@ -287,8 +331,12 @@ def score_job(job, cfg, skills):
     ap = _applicants(job["applicants"])
     cp = w["competition"] * (1 if ap < 25 else 0.7 if ap < 75 else 0.4 if ap < 150 else 0.2)
 
-    total = round(t + sk + lv + lo + rc + cp)
-    return min(total, 99), ""
+    return {"title": t, "skills": sk, "level": lv, "location": lo, "recency": rc, "competition": cp}, ""
+
+
+def score_job(job, cfg, skills):
+    parts, note = score_parts(job, cfg, skills)
+    return min(round(sum(parts.values())), 99), note
 
 
 def rank(jobs, cfg, skills):
@@ -298,9 +346,11 @@ def rank(jobs, cfg, skills):
     for j in jobs:
         blob = f"{j['title']} {j['description']}".lower()
         if any(c in j["company"].lower() for c in bad_co) or any(_term_rx(k).search(blob) for k in bad_kw):
-            j["score"], j["note"] = 0, "blocked"  # company or keyword blocklist from config.yaml
+            j["score"], j["note"], j["breakdown"] = 0, "blocked", {}  # blocklist from config.yaml
         else:
-            j["score"], j["note"] = score_job(j, cfg, skills)
+            parts, j["note"] = score_parts(j, cfg, skills)
+            j["breakdown"] = {k: round(v, 1) for k, v in parts.items()}
+            j["score"] = min(round(sum(parts.values())), 99)
     seen, out = set(), []
     for j in sorted(jobs, key=lambda x: -x["score"]):
         key = (j["title"].lower(), j["company"].lower(), j["location"].lower())

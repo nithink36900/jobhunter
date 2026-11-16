@@ -23,6 +23,17 @@ FIELD_MAP = [  # (regex on label/name/placeholder, profile key)
 ]
 
 
+def match_field(label):
+    """Which profile value belongs in a field with this label (None = leave it alone)."""
+    label = label.lower()
+    if re.search(r"company|employer|referr|reference|manager", label):
+        return None  # these ask about someone else, not you
+    for rx, key in FIELD_MAP:
+        if re.search(rx, label):
+            return key
+    return None
+
+
 def cover_letter(cfg, job, skills):
     p = cfg["profile"]
     return p["cover_letter_template"].format(
@@ -59,11 +70,10 @@ def fill_form(page, cfg, letter, resume_abs):
             if typ in ("checkbox", "radio") or not el.is_visible() or el.input_value():
                 continue
             label = _label(page, el)
-            for rx, key in FIELD_MAP:
-                if re.search(rx, label) and vals.get(key):
-                    el.fill(str(vals[key]))
-                    filled += 1
-                    break
+            key = match_field(label)
+            if key and vals.get(key):
+                el.fill(str(vals[key]))
+                filled += 1
         except Exception:
             continue
     return filled
@@ -105,7 +115,9 @@ def run_applications(jobs, cfg, skills, tracker, log=print):
                 else:
                     page.wait_for_timeout(3000)
                     log(f"    autofilled {fill_form(page, cfg, letter, resume_abs)} fields")
-                    if a["mode"] == "auto" and click_submit(page):
+                    sure = a["mode"] == "auto" and (not a.get("confirm_auto", True) or
+                           input("    Check the form. Submit this application? (y/n): ").strip().lower() == "y")
+                    if sure and click_submit(page):
                         page.wait_for_timeout(4000)
                         tracker.mark(url, "submitted_auto")
                         log("    submit clicked (verify in the browser / your email)")

@@ -173,6 +173,8 @@ async function openJob(url) {
     <p><a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Open application page</a>
     ${j.job_url && j.job_url !== j.apply_url ? ` <a class="btn ghost" href="${esc(j.job_url)}" target="_blank" rel="noopener">Job post</a>` : ""}</p>
     <p><button class="btn ghost" id="sb">${j.starred ? "&#9733; Starred" : "&#9734; Star this job"}</button></p>
+    ${Object.keys(j.breakdown || {}).length ? `<h3>Why this score</h3><div class="bars">${Object.entries(j.breakdown).map(([k, v]) =>
+      `<div><span>${label(k)}</span><i style="width:${Math.min(100, Math.round(v * 3.3))}%"></i><b>${Math.round(v)}</b></div>`).join("")}</div>` : ""}
     <h3>Skill match</h3><div class="chips">${j.matched.map(k => `<span class="chip have" title="You have this">${esc(k)}</span>`).join("")}${j.missing.map(k => `<span class="chip gap" title="Asked for, not on your resume">${esc(k)}</span>`).join("") || (j.matched.length ? "" : '<span class="note">No known skills detected in this description.</span>')}</div>
     <h3>Your notes</h3><textarea id="nt" rows="3" placeholder="Recruiter name, follow-up date, interview details...">${esc(j.notes)}</textarea>
     <span class="note" id="nts"></span>
