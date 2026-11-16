@@ -5,6 +5,8 @@ import re
 import sqlite3
 import time
 from datetime import datetime
+from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 SKILL_VOCAB = [
     "wireshark", "nmap", "metasploit", "burp suite", "sqlmap", "steghide", "python", "java",
@@ -51,9 +53,21 @@ def read_resume(path):
     return open(path, encoding="utf-8", errors="ignore").read()
 
 
+@lru_cache(maxsize=None)
+def _term_rx(term):
+    """Whole-word match, so 'soc' does not hit 'associate' and 'java' does not hit 'javascript'."""
+    return re.compile(r"(?<![a-z0-9])" + re.escape(term) + r"(?![a-z0-9])")
+
+
+@lru_cache(maxsize=None)
+def _stem_rx(stem):
+    """Word-start match ('cyber' still matches 'cybersecurity'); short stems must be whole words."""
+    return _term_rx(stem) if len(stem) <= 3 else re.compile(r"(?<![a-z0-9])" + re.escape(stem))
+
+
 def resume_skills(text):
     low = text.lower()
-    return sorted({s for s in SKILL_VOCAB if re.search(r"(?<![a-z])" + re.escape(s) + r"(?![a-z])", low)})
+    return sorted({s for s in SKILL_VOCAB if _term_rx(s).search(low)})
 
 
 # ------------------------------ fetching ------------------------------
@@ -67,6 +81,20 @@ def _fill(template, values):
     return template
 
 
+_TRACKING = {"refid", "trackingid", "trk", "tracking", "ref", "src", "source", "from", "gclid", "fbclid"}
+
+
+def canon_url(url):
+    """Strip tracking params so the same job is not saved twice (LinkedIn changes them every run)."""
+    if not url or not isinstance(url, str):
+        return url or ""
+    u = urlparse(url.strip())
+    if "linkedin.com" in u.netloc.lower():
+        return urlunparse(u._replace(query="", fragment=""))
+    q = [(k, v) for k, v in parse_qsl(u.query) if k.lower() not in _TRACKING and not k.lower().startswith("utm_")]
+    return urlunparse(u._replace(query=urlencode(q), fragment=""))
+
+
 def normalise(item):
     g = lambda *ks: next((item[k] for k in ks if item.get(k)), "")
     return {
@@ -74,8 +102,8 @@ def normalise(item):
         "company": g("companyName", "company", "companyname"),
         "location": g("location", "jobLocation", "city"),
         "posted": g("postedTime", "postedAt", "postingDateParsed", "publishedAt", "datePosted"),
-        "job_url": g("jobUrl", "url", "link", "jobLink"),
-        "apply_url": g("applyUrl", "externalApplyLink", "applyLink", "jobUrl", "url", "link"),
+        "job_url": canon_url(g("jobUrl", "url", "link", "jobLink")),
+        "apply_url": canon_url(g("applyUrl", "externalApplyLink", "applyLink", "jobUrl", "url", "link")),
         "level": g("experienceLevel", "seniority", "experience"),
         "type": g("contractType", "employmentType", "jobType"),
         "work_type": g("workType", "workplaceType"),
@@ -143,18 +171,24 @@ def fetch_jobs(cfg, token=None, log=print):
     s = cfg["search"]
     values = {"titles": s["titles"], "locations": s["locations"], "rows": s["rows_per_search"],
               "posted_within": s["posted_within"], "experience_levels": s["experience_levels"]}
-    jobs = []
+    jobs, errors = [], []
     for src in cfg["sources"]:
         if not src.get("enabled"):
             continue
         log(f"[fetch] {src['name']} via {src['actor']} ...")
-        run = client.actor(src["actor"]).call(run_input=_fill(src["input_template"], values))
-        for it in client.dataset(_dataset_id(run)).iterate_items():
-            j = normalise(it)
-            j["source"] = src["name"]
-            if j["title"] and j["apply_url"]:
-                jobs.append(j)
+        try:  # one broken source must not throw away what the others found
+            run = client.actor(src["actor"]).call(run_input=_fill(src["input_template"], values))
+            for it in client.dataset(_dataset_id(run)).iterate_items():
+                j = normalise(it)
+                j["source"] = src["name"]
+                if j["title"] and j["apply_url"]:
+                    jobs.append(j)
+        except Exception as e:
+            errors.append(f"{src['name']}: {e}")
+            log(f"[fetch] {src['name']} failed: {e}")
         log(f"[fetch] {src['name']}: {len(jobs)} total so far")
+    if errors and not jobs:
+        raise RuntimeError("All job sources failed. " + " | ".join(errors))
     return jobs
 
 
@@ -181,17 +215,17 @@ def score_job(job, cfg, skills):
     loc = f"{job['location']} {job['work_type']}".lower()
 
     # title: role keywords + closeness to searched titles; excluded words kill the score
-    entry_title = re.search(r"trainee|intern|junior|fresher|entry|graduate|\bassociate\b", title)
-    if not entry_title and any(re.search(rf"\b{re.escape(x)}\b", title) for x in mt["exclude_title_words"]):
+    entry_title = re.search(r"trainee|intern|junior|fresher|entry|graduate", title)
+    if not entry_title and any(_term_rx(x.lower()).search(title) for x in mt["exclude_title_words"]):
         return 0, "senior title"
-    hits = sum(k in title for k in ROLE_WORDS)
+    hits = sum(bool(_stem_rx(k).search(title)) for k in ROLE_WORDS)
     wanted = max((len(set(title.split()) & set(t.lower().split())) / len(t.split())
                   for t in cfg["search"]["titles"]), default=0)
     t = w["title"] * min(1.0, 0.5 * min(hits, 2) + 0.5 * wanted) if hits else 0
 
     # skills overlap with description (falls back to neutral if no description)
     if desc:
-        found = [s for s in skills if s in desc]
+        found = [s for s in skills if _term_rx(s).search(desc)]
         sk = w["skills"] * min(1.0, len(found) / 5)
     else:
         sk = w["skills"] * 0.4
@@ -253,11 +287,12 @@ class Tracker:
 
     def save(self, jobs):
         new = 0
+        known = {r[0] for r in self.db.execute("SELECT apply_url FROM jobs")}  # one query, not one per job
         for j in jobs:
-            cur = self.db.execute("SELECT 1 FROM jobs WHERE apply_url=?", (j["apply_url"],)).fetchone()
-            if cur:
+            if j["apply_url"] in known:
                 self.db.execute("UPDATE jobs SET score=? WHERE apply_url=?", (j["score"], j["apply_url"]))
             else:
+                known.add(j["apply_url"])
                 new += 1
                 self.db.execute("INSERT INTO jobs(apply_url,title,company,score,status,data,updated) VALUES(?,?,?,?,?,?,?)",
                                 (j["apply_url"], j["title"], j["company"], j["score"], "new",
