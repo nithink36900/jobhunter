@@ -32,6 +32,7 @@ class MultiResume(unittest.TestCase):
     def test_add_switch_keeps_edits_rename_delete(self):
         a = server.save_resume({**make_docx(*PRIYA), "label": "Pentester"})
         self.assertEqual((a["profile"]["full_name"], a["resume"]), ("Priya Sharma", "Pentester"))
+        self.assertEqual(a["resumes"][0]["file"], "cv.docx")  # the user's own file name, not the stored one
         server.save_profile({"notice_period": "15 days"})
         b = server.save_resume({**make_docx(*RAHUL), "label": "Cloud"})
         self.assertEqual((b["profile"]["full_name"], b["profile"]["city"]), ("Rahul Verma", "Bengaluru"))

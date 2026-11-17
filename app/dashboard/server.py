@@ -208,7 +208,7 @@ def _label(x):
 
 def resume_list():
     reg = _registry()
-    return [{"id": i["id"], "label": i["label"], "file": os.path.basename(i["path"]), "active": i["id"] == reg["active"]} for i in reg["items"]]
+    return [{"id": i["id"], "label": i["label"], "file": i.get("orig") or os.path.basename(i["path"]), "active": i["id"] == reg["active"]} for i in reg["items"]]
 
 
 def save_resume(b):
@@ -254,7 +254,8 @@ def save_resume(b):
     if reg["active"]:
         _snapshot(reg["active"])  # keep edits made to the resume we are leaving
     prefs = {k: found[k] for k in ("titles", "locations", "preferred_locations", "experience_levels") if found.get(k)}
-    item = {"id": rid, "label": label, "path": f"data/resumes/{rid}{ext}"}
+    item = {"id": rid, "label": label, "path": f"data/resumes/{rid}{ext}",
+            "orig": re.sub(r"[^\w .()\-]", "", os.path.basename(name))[:60]}  # shown in the list; never used as a path
     _write_json(os.path.join(rdir, rid + ".json"), {"profile": {**_read_json(pp), **found["profile"]}, "settings": {**_read_json(sp), **prefs}})
     reg["items"].append(item)
     _activate(reg, item)
