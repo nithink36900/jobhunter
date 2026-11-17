@@ -47,9 +47,9 @@ def validate_cfg(cfg):
         raise SystemExit("\n".join(errs))
     p, m = cfg["profile"], cfg["matching"]
     if not os.path.exists(p.get("resume_path", "")):
-        errs.append(f"Resume not found at '{p.get('resume_path')}'. Put your resume there (.docx, .pdf or .txt).")
+        errs.append("No resume yet. Open the web app (python run.py dashboard), go to Setup and upload your resume.")
     if not str(p.get("full_name", "")).strip() or "YOUR" in str(p.get("full_name", "")).upper():
-        errs.append("Set your name: copy config.local.example.yaml to config.local.yaml and fill it in.")
+        errs.append("Your name is not set. Upload your resume in the web app's Setup page, or fill in config.local.yaml.")
     w = m.get("weights", {})
     if set(w) != {"title", "skills", "level", "location", "recency", "competition"} or any(v < 0 for v in w.values()):
         errs.append("matching.weights needs title, skills, level, location, recency and competition (none negative).")
@@ -76,12 +76,19 @@ def load_cfg(path="config.yaml", settings="data/settings.json"):
         with open(local, encoding="utf-8") as f:
             cfg = _merge(cfg, yaml.safe_load(f) or {})
         _apply_vocab(cfg.get("vocabulary"))
+    prof = os.path.join(os.path.dirname(settings) or ".", "profile.json")  # written by the web app's Setup page
+    if os.path.exists(prof):
+        try:
+            with open(prof, encoding="utf-8") as f:
+                cfg["profile"].update(json.load(f))
+        except ValueError:
+            pass  # damaged file: ignore it instead of crashing
     if os.path.exists(settings):
         try:
             ov = json.load(open(settings, encoding="utf-8"))
         except ValueError:
             ov = {}  # damaged settings file: fall back to config.yaml instead of crashing
-        cfg["search"].update({k: ov[k] for k in ("titles", "locations", "posted_within", "experience_levels") if k in ov})
+        cfg["search"].update({k: ov[k] for k in ("titles", "locations", "posted_within", "experience_levels", "preferred_locations") if k in ov})
         cfg["matching"].update({k: ov[k] for k in ("min_score", "top_n") if k in ov})
     return cfg
 
@@ -113,6 +120,10 @@ def _term_rx(term):
 def _stem_rx(stem):
     """Word-start match ('cyber' still matches 'cybersecurity'); short stems must be whole words."""
     return _term_rx(stem) if len(stem) <= 3 else re.compile(r"(?<![a-z0-9])" + re.escape(stem))
+
+
+def resume_present(cfg):
+    return os.path.exists(cfg["profile"].get("resume_path", ""))
 
 
 def resume_skills(text):
@@ -284,7 +295,8 @@ def _runs(src, values, s):
     if not re.search(r"\{(title|location)\}", json.dumps(src.get("input_template") or {})):
         return [values]
     titles = s["titles"][: src.get("max_titles", 3)]
-    locs = (src.get("locations") or s["locations"])[: src.get("max_locations", 1)]
+    locs = src.get("locations") or ([l.split(",")[0].strip() for l in s["locations"]] if src.get("city_only") else s["locations"])
+    locs = list(dict.fromkeys(locs))[: src.get("max_locations", 1)]
     return [{**values, "title": t, "location": loc} for t in titles for loc in locs]
 
 

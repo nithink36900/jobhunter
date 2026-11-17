@@ -55,7 +55,7 @@ sources:
     enabled: true
     actor: valig/naukri-jobs-scraper
     max_titles: 3
-    locations: [Hyderabad]        # Naukri wants a city, not "City, State, Country"
+    city_only: true               # uses the city from your locations (Naukri/Indeed want a city, not "City, State, Country")
     input_template:
       keywords: "{title}"
       location: "{location}"
@@ -67,7 +67,7 @@ sources:
     enabled: true
     actor: valig/indeed-jobs-scraper
     max_titles: 3
-    locations: [Hyderabad]
+    city_only: true
     input_template:
       country: in
       title: "{title}"

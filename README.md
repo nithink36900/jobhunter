@@ -22,6 +22,7 @@ See **READ ME FIRST.txt** for the step-by-step version.
 - CSV export (`python run.py export` or the Export button), auto-repeat search (`python run.py watch --every 6`)
 
 ## Private details and tests
+First run: open the web app, go to **Setup**, upload your resume, paste your Apify key, check the filled-in details and press *Save and find jobs*. The resume, profile and key are saved in `data/` and `.env`, which are git-ignored.
 Your name, contact details and resume stay on your computer: copy `config.local.example.yaml` to `config.local.yaml` and fill it in. Both that file and `data/resume.*` are git-ignored.
 Run the tests with `python -m unittest discover -s tests`. They also run on every push through GitHub Actions.
 In `auto` apply mode, `apply.confirm_auto: true` asks y/n before each submit.

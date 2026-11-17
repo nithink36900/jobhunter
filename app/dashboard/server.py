@@ -2,6 +2,7 @@
 
     python run.py dashboard          # then open http://127.0.0.1:8765
 """
+import base64
 import json
 import os
 import re
@@ -14,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from .. import core, insights
+from .. import resume as rparse
 from ..cli import export_all
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -21,6 +23,9 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 STATUSES = ["new", "applied", "opened_manual", "submitted_auto", "interview", "offer",
             "rejected", "skipped", "error"]
 RUN = {"proc": None, "log": [], "code": None}
+RESUME_TYPES = {".docx": b"PK", ".pdf": b"%PDF", ".txt": None}  # allowed extensions and the bytes a real file starts with
+PROFILE_KEYS = ("full_name", "email", "phone", "city", "state", "country", "linkedin", "github",
+                "notice_period", "graduation_year", "years_experience", "cover_letter_template")
 
 
 # ------------------------------ database ------------------------------
@@ -114,7 +119,8 @@ def get_settings():
     s = cfg["search"]
     return {"settings": {"titles": s["titles"], "locations": s["locations"], "posted_within": s["posted_within"],
                          "experience_levels": s["experience_levels"], "min_score": m["min_score"], "top_n": m["top_n"]},
-            "skills": skills, "profile": {"name": p["full_name"], "email": p["email"], "phone": p["phone"]},
+            "skills": skills, "profile": {k: p.get(k, "") for k in PROFILE_KEYS},
+            "resume": os.path.basename(p["resume_path"]) if core.resume_present(cfg) else "",
             "apply_mode": cfg["apply"]["mode"], "token_set": core.token_present()}
 
 
@@ -130,6 +136,80 @@ def insight_data(db_path):
     js = list_jobs(db_path)
     days = core.load_cfg()["matching"].get("followup_days", 7)
     return {"analytics": insights.analytics(js), "followups": insights.followups(js, days)}
+
+
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _write_json(path, obj):
+    with open(path + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2)
+    os.replace(path + ".tmp", path)  # atomic swap: never leaves a half-written file
+
+
+def save_resume(b):
+    """Store the uploaded resume, read it, and fill in the profile and search settings from it."""
+    ext = os.path.splitext(str(b.get("filename", "")))[1].lower()
+    if ext not in RESUME_TYPES:
+        raise ValueError("Please upload a .docx, .pdf or .txt resume.")
+    try:
+        raw = base64.b64decode(b["data"], validate=True)
+    except (ValueError, KeyError):
+        raise ValueError("The upload was damaged. Please try again.")
+    if not raw or len(raw) > 5 * 1024 * 1024:
+        raise ValueError("The file is empty or bigger than 5 MB.")
+    if RESUME_TYPES[ext] and not raw.startswith(RESUME_TYPES[ext]):
+        raise ValueError(f"That does not look like a real {ext} file.")
+    data = os.path.join(ROOT, "data")
+    dest = os.path.join(data, "resume" + ext)  # fixed name: the uploaded file name is never used as a path
+    with open(dest + ".tmp", "wb") as f:
+        f.write(raw)
+    os.replace(dest + ".tmp", dest)
+    try:
+        text = core.read_resume(dest)
+        if len(text.strip()) < 30:
+            raise ValueError("No readable text found. If this is a scanned PDF, upload a .docx or a text-based PDF.")
+    except Exception as e:
+        os.remove(dest)
+        raise ValueError(str(e) if isinstance(e, ValueError) else "Could not read that file. Try saving it as .docx or .pdf again.")
+    for other in RESUME_TYPES:  # only one resume at a time
+        if other != ext and os.path.exists(os.path.join(data, "resume" + other)):
+            os.remove(os.path.join(data, "resume" + other))
+    found = rparse.extract_profile(text, core.resume_skills(text))
+    pp, sp = os.path.join(data, "profile.json"), os.path.join(data, "settings.json")
+    _write_json(pp, {**_read_json(pp), **found["profile"], "resume_path": f"data/resume{ext}"})
+    prefs = {k: found[k] for k in ("titles", "locations", "preferred_locations", "experience_levels") if found.get(k)}
+    if prefs:
+        _write_json(sp, {**_read_json(sp), **prefs})
+    out = get_settings()
+    out["found"] = sorted(found["profile"])
+    return out
+
+
+def save_profile(b):
+    pp, sp = os.path.join(ROOT, "data", "profile.json"), os.path.join(ROOT, "data", "settings.json")
+    new = {}
+    for k in PROFILE_KEYS:
+        if k in b:
+            v = str(b[k]).strip()
+            if len(v) > (4000 if k == "cover_letter_template" else 300):
+                raise ValueError(f"'{k.replace('_', ' ')}' is too long.")
+            new[k] = v
+    if new.get("email") and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", new["email"]):
+        raise ValueError("That email address does not look right.")
+    if new.get("phone") and not re.fullmatch(r"\+?[\d\s\-()]{7,20}", new["phone"]):
+        raise ValueError("That phone number does not look right.")
+    if "full_name" in new and not new["full_name"]:
+        raise ValueError("Please enter your name.")
+    old = _read_json(pp)
+    _write_json(pp, {**old, **new})
+    if new.get("city") and new["city"] != old.get("city"):  # keep location scoring in step with the city
+        _write_json(sp, {**_read_json(sp), "preferred_locations": [new["city"].lower(), "remote"]})
 
 
 def letter_for(db_path, url):
@@ -165,7 +245,8 @@ def make_handler(db_path):
             u = urlparse(self.path)
             try:
                 if u.path == "/api/jobs":
-                    return self._send(200, {"jobs": list_jobs(db_path), "statuses": STATUSES, "token_set": core.token_present()})
+                    return self._send(200, {"jobs": list_jobs(db_path), "statuses": STATUSES, "token_set": core.token_present(),
+                                            "resume_set": core.resume_present(core.load_cfg())})
                 if u.path == "/api/run":
                     return self._send(200, run_state())
                 if u.path == "/api/settings":
@@ -194,8 +275,15 @@ def make_handler(db_path):
                     or (origin and urlparse(origin).hostname not in ("127.0.0.1", "localhost"))):
                 return self._send(403, {"error": "forbidden"})
             try:
-                b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-                if self.path == "/api/status":
+                n = int(self.headers.get("Content-Length", 0))
+                if n > 10 * 1024 * 1024:
+                    return self._send(413, {"error": "That upload is too large."})
+                b = json.loads(self.rfile.read(n) or b"{}")
+                if self.path == "/api/resume":
+                    return self._send(200, save_resume(b))
+                if self.path == "/api/profile":
+                    save_profile(b)
+                elif self.path == "/api/status":
                     if b["status"] not in STATUSES:
                         raise ValueError("Unknown status.")
                     query(db_path, "UPDATE jobs SET status=?, updated=datetime('now') WHERE apply_url=?", (b["status"], b["url"]))
@@ -221,9 +309,7 @@ def make_handler(db_path):
                 elif self.path == "/api/settings":
                     clean = clean_settings(b)  # validate BEFORE touching the file
                     path = os.path.join(ROOT, "data", "settings.json")
-                    with open(path + ".tmp", "w", encoding="utf-8") as f:
-                        json.dump(clean, f, indent=2)
-                    os.replace(path + ".tmp", path)  # atomic swap: never leaves a half-written file
+                    _write_json(path, {**_read_json(path), **clean})  # keeps keys this form does not edit
                 else:
                     return self._send(404, {"error": "not found"})
                 self._send(200, {"ok": True})
