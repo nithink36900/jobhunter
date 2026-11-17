@@ -100,6 +100,16 @@ class MultiResume(unittest.TestCase):
         server.save_profile({"notice_period": "15 days"})
         self.assertNotIn("notice_period", server.get_settings()["profile"])
 
+    def test_settings_report_the_running_version(self):
+        self.assertTrue(server.get_settings()["version"])
+
+    def test_stale_copy_is_detected_by_version(self):
+        url = "http://127.0.0.1:8765"
+        self.assertEqual(server.stale_message("abc1234", "abc1234", url), "")
+        self.assertIn("OLDER copy", server.stale_message("old0001", "abc1234", url))
+        self.assertIn("OLDER copy", server.stale_message("", "abc1234", url))  # a copy so old it has no version endpoint
+        self.assertIn("OLDER copy", server.stale_message("unknown", "unknown", url))  # cannot prove it is the same code
+
     def test_old_pdf_resume_is_not_adopted(self):
         open(os.path.join(self.tmp, "data", "resume.pdf"), "wb").write(b"%PDF-1.4")
         server._write_json(os.path.join(self.tmp, "data", "profile.json"), {"resume_path": "data/resume.pdf"})

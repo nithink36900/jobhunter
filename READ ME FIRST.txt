@@ -27,3 +27,7 @@ TO STOP: close the black window.
 Keep this folder as it is. Your resume, details, jobs and settings are stored inside it (the "data" folder) and
 never leave your computer. To use a different resume, upload it again in Setup.
 Never share the file called ".env": it holds your private token.
+
+IF THE PAGE LOOKS OLD AFTER AN UPDATE
+  Old black JobHunter windows keep running the old version. Close ALL of them, then start JobHunter again.
+  The Setup page shows the version at the bottom, so you can check you are on the latest one.

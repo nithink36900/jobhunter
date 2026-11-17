@@ -295,7 +295,7 @@ async function settingsView(msg = "") {
     <p><button class="btn ghost" id="save">Save</button> <button class="btn" id="go2">Save and find jobs</button> <span class="note" id="ss"></span></p>
   </div>
   <h3>Skills found in your resume (${d.skills.length})</h3><div class="chips">${d.skills.map(k => `<span class="chip">${esc(k)}</span>`).join("") || '<span class="note">None yet.</span>'}</div>
-  <p class="note">Apply mode: <b>${esc(d.apply_mode)}</b> (change it in config.yaml).</p>`;
+  <p class="note">Apply mode: <b>${esc(d.apply_mode)}</b> (change it in config.yaml). JobHunter version <b>${esc(d.version)}</b>.</p>`;
   const say = (id, ok, t) => $(id).innerHTML = `<span class="${ok ? "ok" : "bad"}">${esc(t)}</span>`;
   $("#rf").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;

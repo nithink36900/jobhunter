@@ -39,7 +39,8 @@ echo  Keep this window open while you use it. Close it to stop JobHunter.
 echo.
 ".venv\Scripts\python.exe" run.py dashboard
 echo.
-echo  JobHunter has stopped.
+echo  JobHunter is no longer running in this window.
+echo  If a message above says an older copy is running, close that other black window, then start JobHunter again.
 pause
 exit /b 0
 

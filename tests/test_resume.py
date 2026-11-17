@@ -71,6 +71,16 @@ class TitlesFollowTheResume(unittest.TestCase):
         r = read("Manoj\nSkills: Python, Git")
         self.assertTrue(r["titles"])
 
+    def test_non_it_jobs(self):
+        self.assertIn("Staff Nurse", read("Anitha\nChennai | a@x.com | 9111122222\nStaff Nurse with 3 years in ICU.\nSkills: patient care, BLS")["titles"])
+        self.assertIn("Mathematics Teacher", read("Suresh\nMathematics Teacher with 5 years teaching CBSE.\nSkills: lesson planning")["titles"])
+        self.assertIn("Design Engineer", read("Ravi\nOBJECTIVE\nTo work as a Design Engineer in a reputed company.\nSkills: AutoCAD, SolidWorks")["titles"])
+
+    def test_skills_line_is_the_last_resort(self):
+        r = read("Meena\nmeena@x.com\nSkills: patient care, IV cannulation, wound dressing, BLS")
+        self.assertEqual(r["titles"], ["patient care", "IV cannulation", "wound dressing"])
+        self.assertTrue(r["titles_are_keywords"])
+
     def test_graduation_year_is_the_end_of_the_course(self):
         self.assertEqual(read("B.E. Information Technology, 2022 - 2024")["profile"]["graduation_year"], "2024")
         self.assertEqual(read("Expected Graduation 2026")["profile"]["graduation_year"], "2026")

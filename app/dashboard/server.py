@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import urllib.request
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -23,6 +24,25 @@ from ..cli import export_all
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+def _version():
+    """The code this process loaded (git commit), so a stale copy that was never restarted is easy to spot."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True, timeout=3)
+        return r.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
+def stale_message(theirs, ours, url):
+    """What to tell the user when the port is taken: '' means the running copy is this same version (safe to open)."""
+    if theirs and theirs == ours and ours != "unknown":
+        return ""
+    return (f"An OLDER copy of JobHunter is still running (version {theirs or 'unknown'}; this one is {ours}).\n"
+            f"Close the other black JobHunter window (or restart the computer), then start JobHunter again.\n"
+            f"Until then, {url} shows the old version.")
+
+
+VERSION = _version()
 STATUSES = ["new", "applied", "opened_manual", "submitted_auto", "interview", "offer",
             "rejected", "skipped", "error"]
 RUN = {"proc": None, "log": [], "code": None}
@@ -126,7 +146,7 @@ def get_settings():
             "skills": skills, "profile": {k: p.get(k, "") for k in PROFILE_KEYS},
             "resume": p.get("resume_label") or os.path.basename(p["resume_path"]) if core.resume_present(cfg) else "",
             "resumes": resume_list(),
-            "apply_mode": cfg["apply"]["mode"], "token_set": core.token_present()}
+            "apply_mode": cfg["apply"]["mode"], "token_set": core.token_present(), "version": VERSION}
 
 
 def job_detail(db_path, url):
@@ -408,6 +428,8 @@ def make_handler(db_path):
                     return self._send(200, run_state())
                 if u.path == "/api/settings":
                     return self._send(200, get_settings())
+                if u.path == "/api/version":
+                    return self._send(200, {"version": VERSION})
                 if u.path == "/api/job":
                     return self._send(200, job_detail(db_path, parse_qs(u.query)["url"][0]))
                 if u.path == "/api/insights":
@@ -490,7 +512,16 @@ def serve(db_path="data/jobs.db", port=8765, open_browser=True):
     try:
         server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(db_path))
     except OSError:
-        print(f"Port {port} is already in use. JobHunter is probably already running: open {url}")
+        try:
+            with urllib.request.urlopen(url + "/api/version", timeout=3) as r:
+                theirs = json.load(r).get("version", "")
+        except Exception:
+            theirs = ""  # an old copy has no version endpoint
+        msg = stale_message(theirs, VERSION, url)
+        if msg:
+            print("\n" + msg + "\n")
+            return
+        print(f"JobHunter is already running (version {VERSION}). Opening {url}")
         if open_browser:
             webbrowser.open(url)
         return

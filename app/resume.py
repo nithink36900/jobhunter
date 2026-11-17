@@ -69,7 +69,7 @@ def tech_skills(text):
     return [t for t in TECH if re.search(r"(?<![\w+#.])" + re.escape(t) + r"(?![\w+#])", low)]
 
 
-_ROLE = r"(?:engineers?|developers?|analysts?|testers?|administrators?|architects?|consultants?|specialists?|designers?|scientists?|researchers?|programmers?|technicians?|executives?|officers?|trainees?|interns?|associates?|managers?)"
+_ROLE = r"(?:engineers?|developers?|analysts?|testers?|administrators?|architects?|consultants?|specialists?|designers?|scientists?|researchers?|programmers?|technicians?|executives?|officers?|trainees?|interns?|associates?|managers?|nurses?|teachers?|lecturers?|professors?|tutors?|trainers?|supervisors?|accountants?|auditors?|pharmacists?|writers?|editors?|representatives?|coordinators?|assistants?|clerks?|operators?|planners?|recruiters?|counsell?ors?|therapists?|doctors?|chefs?|electricians?|surveyors?|estimators?)"
 _TITLE_RX = re.compile(r"\b((?:[A-Za-z][\w+#/&.\-]*[ \t]+){0,3}" + _ROLE + r")\b", re.I)
 _LEAD_STOP = set("a an the as and or of in at to for with by from on my our your their his her i we is was be been being am are role roles "
                  "position post job opening opportunity seeking seek looking aspiring experienced motivated passionate dedicated strong good great "
@@ -92,7 +92,7 @@ def titles_in_text(text, limit=4):
         words = m.group(1).split()
         while len(words) > 1 and words[0].lower().strip(".,:;") in _LEAD_STOP:
             words = words[1:]
-        if len(words) < 2 or any(re.search(r"\d", w) for w in words) or len(" ".join(words)) > 40:
+        if (len(words) < 2 and words[-1].lower().rstrip("s") not in SINGLE_OK) or any(re.search(r"\d", w) for w in words) or len(" ".join(words)) > 40:
             continue
         if any(w.lower().strip(".,:;") in _LEAD_STOP for w in words[:-1]):
             continue
@@ -104,6 +104,7 @@ def titles_in_text(text, limit=4):
     return [shown[k] for k, _ in sorted(score.items(), key=lambda kv: (-kv[1], kv[0]))][:limit]
 
 
+SINGLE_OK = {"nurse", "teacher", "accountant", "pharmacist", "electrician", "chef", "lecturer", "professor", "tutor", "recruiter", "therapist", "doctor", "auditor"}
 _NOT_NAME = re.compile(r"resume|curriculum|vitae|objective|summary|profile|contact|career|education|skills|@|\d|http|www", re.I)
 
 
@@ -185,10 +186,35 @@ def suggest_titles(skills, text, limit=6):
     return out[:limit]
 
 
+def skills_line(text, limit=3):
+    """The first few items of the resume's own 'Skills' line or section, as written."""
+    lines, items = text.splitlines(), []
+    for i, l in enumerate(lines):
+        m = re.match(r"\s*(?:technical\s+|key\s+|core\s+)?skills?\s*[:\-]\s*(.+)$", l, re.I)
+        if m:
+            items = re.split(r"[,;|•·]", m.group(1))
+            break
+        if re.fullmatch(r"\s*(?:technical |key |core )?skills\s*:?\s*", l, re.I):
+            for nxt in lines[i + 1:i + 6]:
+                if re.fullmatch(r"\s*[A-Z &]{4,}:?\s*", nxt):
+                    break
+                items += re.split(r"[,;|•·]", nxt)
+            break
+    out = []
+    for it in (x.strip(" .-–•\t") for x in items):
+        if 1 <= len(it.split()) <= 3 and 2 <= len(it) <= 30 and re.search(r"[A-Za-z]", it) and it.lower() not in {o.lower() for o in out}:
+            out.append(it)
+    return out[:limit]
+
+
 def keyword_titles(skills, text, limit=3):
-    """Last resort when no role can be told: search by the resume's own strongest skills."""
-    words = list(dict.fromkeys(list(skills) + tech_skills(text)))
-    return [w.upper() if len(w) <= 4 and w.isalpha() else w.title() for w in words[:limit]]
+    """Last resort when no role can be told: search by the resume's own strongest skills and Skills line."""
+    known = [w.upper() if len(w) <= 4 and w.isalpha() else w.title() for w in dict.fromkeys(list(skills) + tech_skills(text))]
+    out = known[:limit]
+    for it in skills_line(text, limit):
+        if len(out) < limit and it.lower() not in {o.lower() for o in out}:
+            out.append(it)
+    return out
 
 
 def extract_profile(text, skills):
