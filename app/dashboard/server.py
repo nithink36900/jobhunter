@@ -28,7 +28,8 @@ STATUSES = ["new", "applied", "opened_manual", "submitted_auto", "interview", "o
 RUN = {"proc": None, "log": [], "code": None}
 RESUME_TYPES = {".docx": b"PK"}  # Word documents only, and the bytes a real one starts with
 PROFILE_KEYS = ("full_name", "email", "phone", "city", "state", "country", "linkedin", "github",
-                "notice_period", "graduation_year", "years_experience", "cover_letter_template")
+                "graduation_year", "years_experience", "cover_letter_template")
+RESUME_FIELDS = ("full_name", "email", "phone", "city", "state", "country", "linkedin", "github", "graduation_year", "years_experience")
 
 
 # ------------------------------ database ------------------------------
@@ -211,6 +212,29 @@ def resume_list():
     return [{"id": i["id"], "label": i["label"], "file": i.get("orig") or os.path.basename(i["path"]), "active": i["id"] == reg["active"]} for i in reg["items"]]
 
 
+def _read_resume_details(text, old_prof, old_set):
+    """Details for a resume come ONLY from that resume. Nothing is carried over from another one (left blank if not found)."""
+    tech = rparse.tech_skills(text)
+    extras = [t for t in tech if t not in core.SKILL_VOCAB]
+    core._apply_vocab({"skills": extras})  # so the extra skills count from now on
+    found = rparse.extract_profile(text, core.resume_skills(text))
+    keep = {k: v for k, v in old_prof.items() if k not in RESUME_FIELDS and k not in ("extra_skills", "resume_path", "resume_label")}
+    prof = {**keep, **{k: "" for k in RESUME_FIELDS}, **found["profile"], "extra_skills": extras}
+    sets = {**{k: v for k, v in old_set.items() if k in ("posted_within", "min_score", "top_n")},
+            "titles": found["titles"], "locations": found.get("locations") or ["India"],
+            "preferred_locations": found.get("preferred_locations") or ["remote"], "experience_levels": found["experience_levels"]}
+    warn = []
+    if not found["titles"]:
+        warn.append("We could not tell which job titles suit this resume. Type the titles you want in step 3.")
+    elif found.get("titles_are_keywords"):
+        warn.append("No job title was clear in this resume, so the searches use its main skills as keywords. Replace them with real job titles in step 3 if you can.")
+    if "city" not in found["profile"]:
+        warn.append("No city found in the resume. Set your location in step 3.")
+    if "full_name" not in found["profile"]:
+        warn.append("Could not find your name. Please type it in step 3.")
+    return found, prof, sets, warn
+
+
 def save_resume(b):
     """Store an uploaded resume as a new entry, read it, make it the one in use and fill in its details."""
     name = str(b.get("filename", ""))
@@ -249,18 +273,35 @@ def save_resume(b):
     except Exception as e:
         os.remove(dest)
         raise ValueError(str(e) if isinstance(e, ValueError) else "Could not read that file. Try opening it in Word and saving it again as .docx.")
-    found = rparse.extract_profile(text, core.resume_skills(text))
+    found, prof, sets, warn = _read_resume_details(text, _read_json(pp), _read_json(sp))
     label = _label(b.get("label")) or _label(re.sub(r"[_\-]+", " ", os.path.splitext(os.path.basename(name))[0])) or f"Resume {len(reg['items']) + 1}"
     if reg["active"]:
         _snapshot(reg["active"])  # keep edits made to the resume we are leaving
-    prefs = {k: found[k] for k in ("titles", "locations", "preferred_locations", "experience_levels") if found.get(k)}
     item = {"id": rid, "label": label, "path": f"data/resumes/{rid}{ext}",
             "orig": re.sub(r"[^\w .()\-]", "", os.path.basename(name))[:60]}  # shown in the list; never used as a path
-    _write_json(os.path.join(rdir, rid + ".json"), {"profile": {**_read_json(pp), **found["profile"]}, "settings": {**_read_json(sp), **prefs}})
+    _write_json(os.path.join(rdir, rid + ".json"), {"profile": prof, "settings": sets})
     reg["items"].append(item)
     _activate(reg, item)
     out = get_settings()
-    out["found"] = sorted(found["profile"])
+    out["found"], out["warnings"] = sorted(found["profile"]), warn
+    return out
+
+
+def resume_refill(b):
+    """Read the resume in use again and replace its details, titles and locations with what it says."""
+    reg = _registry()
+    item = _find(reg, reg["active"])
+    _, _, _, pp, sp = _p()
+    try:
+        text = core.read_resume(os.path.join(ROOT, item["path"]))
+    except Exception:
+        raise ValueError("Could not read that resume again. Try uploading it once more.")
+    found, prof, sets, warn = _read_resume_details(text, _read_json(pp), _read_json(sp))
+    _write_json(pp, {**prof, "resume_path": item["path"], "resume_label": item["label"]})
+    _write_json(sp, sets)
+    _snapshot(item["id"])
+    out = get_settings()
+    out["found"], out["warnings"] = sorted(found["profile"]), warn
     return out
 
 
@@ -396,7 +437,7 @@ def make_handler(db_path):
                     return self._send(413, {"error": "That upload is too large."})
                 b = json.loads(self.rfile.read(n) or b"{}")
                 routes = {"/api/resume": save_resume, "/api/resume/select": resume_select,
-                          "/api/resume/rename": resume_rename, "/api/resume/delete": resume_delete}
+                          "/api/resume/rename": resume_rename, "/api/resume/delete": resume_delete, "/api/resume/refill": resume_refill}
                 if self.path in routes:
                     return self._send(200, routes[self.path](b))
                 if self.path == "/api/profile":

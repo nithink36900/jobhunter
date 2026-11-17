@@ -13,7 +13,7 @@ def make_docx(*lines):
     return {"filename": "cv.docx", "data": base64.b64encode(buf.getvalue()).decode()}
 
 
-PRIYA = ("PRIYA SHARMA", "Hyderabad, Telangana | priya@example.com", "Python, Nmap, Burp Suite, Metasploit, SIEM, Splunk, VAPT")
+PRIYA = ("PRIYA SHARMA", "Hyderabad, Telangana | priya@example.com", "B.Tech in Computer Science, Expected Graduation 2026", "Python, Nmap, Burp Suite, Metasploit, SIEM, Splunk, VAPT")
 RAHUL = ("RAHUL VERMA", "Bengaluru, Karnataka | rahul@example.com", "AWS, cloud security, IAM, Python, encryption, firewall")
 
 
@@ -33,13 +33,13 @@ class MultiResume(unittest.TestCase):
         a = server.save_resume({**make_docx(*PRIYA), "label": "Pentester"})
         self.assertEqual((a["profile"]["full_name"], a["resume"]), ("Priya Sharma", "Pentester"))
         self.assertEqual(a["resumes"][0]["file"], "cv.docx")  # the user's own file name, not the stored one
-        server.save_profile({"notice_period": "15 days"})
+        server.save_profile({"github": "https://github.com/priya-lab"})
         b = server.save_resume({**make_docx(*RAHUL), "label": "Cloud"})
         self.assertEqual((b["profile"]["full_name"], b["profile"]["city"]), ("Rahul Verma", "Bengaluru"))
         self.assertIn("Cloud Security Engineer", b["settings"]["titles"])
         ids = self.ids(b)
         back = server.resume_select({"id": ids["Pentester"]})
-        self.assertEqual((back["profile"]["full_name"], back["profile"]["notice_period"]), ("Priya Sharma", "15 days"))
+        self.assertEqual((back["profile"]["full_name"], back["profile"]["github"]), ("Priya Sharma", "https://github.com/priya-lab"))
         self.assertEqual(server.resume_rename({"id": ids["Cloud"], "label": " Cloud   sec "})["resumes"][1]["label"], "Cloud sec")
         gone = server.resume_delete({"id": ids["Pentester"]})  # deleting the one in use falls back to the other
         self.assertEqual((len(gone["resumes"]), gone["profile"]["full_name"]), (1, "Rahul Verma"))
@@ -74,6 +74,31 @@ class MultiResume(unittest.TestCase):
         server.save_resume(make_docx(*PRIYA))
         with self.assertRaises(ValueError):
             server.resume_rename({"id": "main", "label": "x"})
+
+    def test_new_resume_does_not_inherit_the_old_ones_details(self):
+        a = server.save_resume({**make_docx(*PRIYA), "label": "Security"})
+        self.assertEqual((a["profile"]["graduation_year"], a["profile"]["city"]), ("2026", "Hyderabad"))
+        b = server.save_resume({**make_docx("KAVYA N", "kavya@example.com 9123456789", "Skills: Tally, Accounting, GST, Excel"), "label": "Accounts"})
+        self.assertEqual(b["profile"]["graduation_year"], "")  # not in this resume, so blank, not Priya's 2026
+        self.assertEqual(b["profile"]["city"], "")
+        self.assertEqual(b["settings"]["titles"], ["Accountant"])
+        self.assertEqual(b["settings"]["locations"], ["India"])
+        self.assertNotIn("Penetration Tester", b["settings"]["titles"])
+        self.assertTrue(any("city" in w.lower() for w in b["warnings"]))
+
+    def test_refill_replaces_edits_with_what_the_resume_says(self):
+        server.save_resume(make_docx(*PRIYA))
+        server.save_profile({"city": "Chennai", "graduation_year": "1999"})
+        server._write_json(os.path.join(self.tmp, "data", "settings.json"), {"titles": ["Chef"], "locations": ["Paris"]})
+        r = server.resume_refill({})
+        self.assertEqual((r["profile"]["city"], r["profile"]["graduation_year"]), ("Hyderabad", "2026"))
+        self.assertNotIn("Chef", r["settings"]["titles"])
+        self.assertEqual(r["settings"]["locations"][0], "Hyderabad, Telangana, India")
+
+    def test_notice_period_is_no_longer_stored(self):
+        server.save_resume(make_docx(*PRIYA))
+        server.save_profile({"notice_period": "15 days"})
+        self.assertNotIn("notice_period", server.get_settings()["profile"])
 
     def test_old_pdf_resume_is_not_adopted(self):
         open(os.path.join(self.tmp, "data", "resume.pdf"), "wb").write(b"%PDF-1.4")

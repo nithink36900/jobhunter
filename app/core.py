@@ -49,7 +49,7 @@ def validate_cfg(cfg):
     if not os.path.exists(p.get("resume_path", "")):
         errs.append("No resume yet. Open the web app (python run.py dashboard), go to Setup and upload your resume as a Word (.docx) file.")
     if not str(p.get("full_name", "")).strip() or "YOUR" in str(p.get("full_name", "")).upper():
-        errs.append("Your name is not set. Upload your resume in the web app's Setup page, or fill in config.local.yaml.")
+        errs.append("Your name is not set. Type it in the web app's Setup page (step 3), or fill in config.local.yaml.")
     w = m.get("weights", {})
     if set(w) != {"title", "skills", "level", "location", "recency", "competition"} or any(v < 0 for v in w.values()):
         errs.append("matching.weights needs title, skills, level, location, recency and competition (none negative).")
@@ -58,7 +58,7 @@ def validate_cfg(cfg):
     if not 0 <= m.get("min_score", -1) <= 100:
         errs.append("matching.min_score must be between 0 and 100.")
     if not cfg["search"].get("titles") or not cfg["search"].get("locations"):
-        errs.append("search.titles and search.locations cannot be empty.")
+        errs.append("Add at least one job title and one location to search (web app, Setup, step 3).")
     if cfg["apply"].get("mode") not in ("assist", "auto"):
         errs.append("apply.mode must be 'assist' or 'auto'.")
     if errs:
@@ -83,6 +83,7 @@ def load_cfg(path="config.yaml", settings="data/settings.json"):
                 cfg["profile"].update(json.load(f))
         except ValueError:
             pass  # damaged file: ignore it instead of crashing
+        _apply_vocab({"skills": cfg["profile"].get("extra_skills")})  # skills read from the resume that the built-in list lacks
     if os.path.exists(settings):
         try:
             ov = json.load(open(settings, encoding="utf-8"))
@@ -359,6 +360,16 @@ def _applicants(txt):
     return int(m.group(1)) if m else 100
 
 
+_GENERIC = {"analyst", "engineer", "developer", "specialist", "executive", "associate", "intern", "trainee", "junior", "senior", "manager",
+            "officer", "consultant", "administrator", "programmer", "technician", "designer", "and", "the", "for", "with", "lead", "entry",
+            "level", "fresher", "graduate", "internship", "sr", "jr"}
+
+
+def _wanted_words(titles):
+    """Distinctive words of the titles you search (python, data, testing...), so any field scores, not only security."""
+    return {w for t in titles for w in re.findall(r"[a-z0-9+#.]+", t.lower()) if len(w) >= 3 and w not in _GENERIC}
+
+
 def score_parts(job, cfg, skills):
     w, mt = cfg["matching"]["weights"], cfg["matching"]
     title, desc = job["title"].lower(), job["description"].lower()
@@ -368,7 +379,7 @@ def score_parts(job, cfg, skills):
     entry_title = re.search(r"trainee|intern|junior|fresher|entry|graduate", title)
     if not entry_title and any(_term_rx(x.lower()).search(title) for x in mt["exclude_title_words"]):
         return {}, "senior title"
-    hits = sum(bool(_stem_rx(k).search(title)) for k in ROLE_WORDS)
+    hits = sum(bool(_stem_rx(k).search(title)) for k in set(ROLE_WORDS) | _wanted_words(cfg["search"]["titles"]))
     wanted = max((len(set(title.split()) & set(t.lower().split())) / len(t.split())
                   for t in cfg["search"]["titles"]), default=0)
     t = w["title"] * min(1.0, 0.5 * min(hits, 2) + 0.5 * wanted) if hits else 0

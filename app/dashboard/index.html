@@ -255,8 +255,10 @@ async function pollRun() {
 /* ---------- Setup (resume, token, details) ---------- */
 const PF = [["full_name", "Full name"], ["email", "Email"], ["phone", "Phone"], ["city", "City"], ["state", "State"],
   ["linkedin", "LinkedIn URL"], ["github", "GitHub URL"], ["graduation_year", "Graduation year"],
-  ["years_experience", "Years of experience"], ["notice_period", "Notice period"]];
+  ["years_experience", "Years of experience"]];
 const toB64 = buf => { let s = ""; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode(...u.subarray(i, i + 0x8000)); return btoa(s); };
+
+const readMsg = (r, head = "Resume read.") => `<b>${head}</b> Found: ${r.found.map(x => x.replace(/_/g, " ")).join(", ") || "no contact details"}, and ${r.skills.length} skills. Check the details below${tokenSet ? ", then press Save and find jobs." : ", add your Apify key, then press Save and find jobs."}${(r.warnings || []).map(w => "<br>" + esc(w)).join("")}`;
 
 async function settingsView(msg = "") {
   let d; try { d = await api("/api/settings"); } catch (e) { $("#view").innerHTML = `<p class="bad">${esc(e.message)}</p>`; return; }
@@ -277,10 +279,11 @@ async function settingsView(msg = "") {
     <input type="password" id="tk" autocomplete="off" placeholder="apify_api_..." aria-label="Apify token">
     <p><button class="btn ghost" id="tks">Save key</button> <span class="note" id="tkm"></span></p></div>
   <h3>3. Check your details</h3>
-  <p class="note">${d.resume ? "Filled in from your resume. Fix anything that is wrong." : "These fill in automatically after you upload a resume."}</p>
+  <p class="note">${d.resume ? "Filled in from the resume in use. Fix anything that is wrong." : "These fill in automatically after you upload a resume."}</p>
+  ${d.resume ? '<p><button class="btn ghost" id="refill">Refill everything from the resume in use</button> <span class="note" id="rfm"></span></p>' : ""}
   <div class="form">
     ${PF.map(([k, t]) => `<label>${t}<input type="text" id="p_${k}" value="${esc(p[k])}"></label>`).join("")}
-    <label>Job titles to search <small>One per line. Suggested from your skills.</small><textarea id="s_t" rows="6">${esc(s.titles.join("\n"))}</textarea></label>
+    <label>Job titles to search <small>One per line. Taken from the job titles and skills in your resume. Edit freely.</small><textarea id="s_t" rows="6">${esc(s.titles.join("\n"))}</textarea></label>
     <label>Locations <small>One per line</small><textarea id="s_l" rows="3">${esc(s.locations.join("\n"))}</textarea></label>
     <label>Posted within <select id="s_p">${[["r86400", "Last 24 hours"], ["r604800", "Last 7 days"], ["r2592000", "Last 30 days"]].map(([v, t]) =>
       `<option value="${v}" ${v === s.posted_within ? "selected" : ""}>${t}</option>`).join("")}</select></label>
@@ -301,8 +304,12 @@ async function settingsView(msg = "") {
     $("#rm").textContent = " Reading your resume...";
     try {
       const r = await api("/api/resume", {filename: f.name, data: toB64(await f.arrayBuffer()), label: $("#rl").value});
-      await settingsView(`<b>Resume read.</b> Found: ${r.found.map(x => x.replace(/_/g, " ")).join(", ") || "no contact details"}, and ${r.skills.length} skills. Check the details below${tokenSet ? ", then press Save and find jobs." : ", add your Apify key, then press Save and find jobs."}`);
+      await settingsView(readMsg(r));
     } catch (err) { say("#rm", false, " " + err.message); }
+  };
+  if ($("#refill")) $("#refill").onclick = async () => {
+    if (!confirm("Replace the details, job titles and locations below with what the resume says? Your edits to them will be lost.")) return;
+    try { await settingsView(readMsg(await api("/api/resume/refill", {}), "Refilled from the resume.")); } catch (e) { say("#rfm", false, e.message); }
   };
   document.querySelectorAll("[data-ra]").forEach(b => b.onclick = async () => {
     const id = b.dataset.id, act = b.dataset.ra;

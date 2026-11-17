@@ -47,6 +47,46 @@ class Extract(unittest.TestCase):
         self.assertEqual(resume.extract_profile("Curriculum Vitae\nAnil Rao\nanil@x.com", [])["profile"]["full_name"], "Anil Rao")
 
 
+def read(text):
+    return resume.extract_profile(text, core.resume_skills(text))
+
+
+class TitlesFollowTheResume(unittest.TestCase):
+    def test_other_fields_get_their_own_titles(self):
+        dev = read("Arjun M\nPune, Maharashtra | a@x.com | 9988776655\nFull Stack Developer. Skills: React, Node.js, MongoDB, SQL, Git")
+        self.assertIn("Full Stack Developer", dev["titles"])
+        self.assertNotIn("SOC Analyst", dev["titles"])
+        self.assertEqual(read("Sneha R\nProfile: Data Analyst. SQL, Excel, Power BI, Tableau, Pandas")["titles"], ["Data Analyst"])
+        self.assertEqual(read("Kavya N\nkavya@x.com\nSkills: Tally, Accounting, GST, Excel")["titles"], ["Accountant"])
+
+    def test_no_junk_across_lines_and_no_level_words(self):
+        r = read("Dev\nSKILLS SQL\nEXPERIENCE Software Developer Intern\nAspiring entry level SOC Analyst")
+        self.assertTrue(all("EXPERIENCE" not in t and "Entry" not in t for t in r["titles"]), r["titles"])
+        self.assertIn("SOC Analyst", r["titles"])
+
+    def test_weak_side_matches_are_dropped(self):
+        self.assertNotIn("Software Developer", read("Profile: Data Analyst. SQL, Excel, Power BI, Tableau, Pandas, Python")["titles"])
+
+    def test_keywords_when_no_role_is_clear(self):
+        r = read("Manoj\nSkills: Python, Git")
+        self.assertTrue(r["titles"])
+
+    def test_graduation_year_is_the_end_of_the_course(self):
+        self.assertEqual(read("B.E. Information Technology, 2022 - 2024")["profile"]["graduation_year"], "2024")
+        self.assertEqual(read("Expected Graduation 2026")["profile"]["graduation_year"], "2026")
+
+
+class Places(unittest.TestCase):
+    def test_location_line_and_contact_line(self):
+        self.assertEqual(read("Kavya\nLocation: Tirupati, Andhra Pradesh\nk@x.com")["profile"]["city"], "Tirupati")
+        r = read("Tom\nAustin, Texas | tom@x.com | +1 512 555 0142\nJava")
+        self.assertEqual((r["profile"]["city"], r["profile"]["state"], r["locations"]), ("Austin", "Texas", ["Austin, Texas"]))
+        self.assertNotIn("country", r["profile"])  # not assumed to be India
+
+    def test_degree_line_is_not_a_city(self):
+        self.assertNotIn("city", read("Raj\nraj@x.com 9000000001\nB.Tech, Computer Science\nSkills: Python")["profile"])
+
+
 class ProfileFile(unittest.TestCase):
     def test_profile_json_overrides_config_and_survives_damage(self):
         with tempfile.TemporaryDirectory() as d:
