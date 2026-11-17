@@ -5,6 +5,7 @@
 import base64
 import json
 import os
+import secrets
 import re
 import sqlite3
 import subprocess
@@ -47,7 +48,7 @@ def list_jobs(db_path):
         r.update({"location": d.get("location", ""), "level": d.get("level", ""), "work_type": d.get("work_type", ""),
                   "type": d.get("type", ""), "posted": d.get("posted", ""), "applicants": d.get("applicants", ""),
                   "source": d.get("source", ""), "job_url": d.get("job_url", ""),
-                  "matched": d.get("matched", []), "missing": d.get("missing", []), "salary": d.get("salary", ""), "breakdown": d.get("breakdown", {}),
+                  "resume": d.get("resume", ""), "matched": d.get("matched", []), "missing": d.get("missing", []), "salary": d.get("salary", ""), "breakdown": d.get("breakdown", {}),
                   "starred": bool(r["starred"]), "notes": r["notes"] or ""})  # descriptions load on demand (/api/job)
         out.append(r)
     return out
@@ -120,7 +121,8 @@ def get_settings():
     return {"settings": {"titles": s["titles"], "locations": s["locations"], "posted_within": s["posted_within"],
                          "experience_levels": s["experience_levels"], "min_score": m["min_score"], "top_n": m["top_n"]},
             "skills": skills, "profile": {k: p.get(k, "") for k in PROFILE_KEYS},
-            "resume": os.path.basename(p["resume_path"]) if core.resume_present(cfg) else "",
+            "resume": p.get("resume_label") or os.path.basename(p["resume_path"]) if core.resume_present(cfg) else "",
+            "resumes": resume_list(),
             "apply_mode": cfg["apply"]["mode"], "token_set": core.token_present()}
 
 
@@ -152,9 +154,65 @@ def _write_json(path, obj):
     os.replace(path + ".tmp", path)  # atomic swap: never leaves a half-written file
 
 
+MAX_RESUMES = 10
+
+
+def _p():
+    d = os.path.join(ROOT, "data")
+    return d, os.path.join(d, "resumes"), os.path.join(d, "resumes.json"), os.path.join(d, "profile.json"), os.path.join(d, "settings.json")
+
+
+def _registry():
+    """The list of uploaded resumes and which one is in use. Adopts a resume uploaded before this feature existed."""
+    _, _, rp, pp, _ = _p()
+    reg = _read_json(rp)
+    items = [i for i in reg.get("items", []) if isinstance(i, dict) and i.get("id") and i.get("path")
+             and os.path.exists(os.path.join(ROOT, str(i["path"])))]
+    if not items:
+        cur = _read_json(pp).get("resume_path")
+        if cur and os.path.exists(os.path.join(ROOT, cur)):
+            items = [{"id": "main", "label": "My resume", "path": cur}]
+    active = reg.get("active") if reg.get("active") in {i["id"] for i in items} else (items[0]["id"] if items else "")
+    return {"items": items, "active": active}
+
+
+def _snapshot(rid):
+    """Remember the in-use resume's details, so switching away and back keeps your edits."""
+    _, rdir, _, pp, sp = _p()
+    os.makedirs(rdir, exist_ok=True)
+    _write_json(os.path.join(rdir, rid + ".json"), {"profile": _read_json(pp), "settings": _read_json(sp)})
+
+
+def _activate(reg, item):
+    _, rdir, rp, pp, sp = _p()
+    snap = _read_json(os.path.join(rdir, item["id"] + ".json"))
+    _write_json(pp, {**(snap.get("profile") or _read_json(pp)), "resume_path": item["path"], "resume_label": item["label"]})
+    if "settings" in snap:
+        _write_json(sp, snap["settings"])
+    reg["active"] = item["id"]
+    _write_json(rp, reg)
+
+
+def _find(reg, rid):
+    item = next((i for i in reg["items"] if i["id"] == rid), None)
+    if not item:
+        raise ValueError("That resume was not found.")
+    return item
+
+
+def _label(x):
+    return re.sub(r"\s+", " ", str(x or "")).strip()[:40]
+
+
+def resume_list():
+    reg = _registry()
+    return [{"id": i["id"], "label": i["label"], "file": os.path.basename(i["path"]), "active": i["id"] == reg["active"]} for i in reg["items"]]
+
+
 def save_resume(b):
-    """Store the uploaded resume, read it, and fill in the profile and search settings from it."""
-    ext = os.path.splitext(str(b.get("filename", "")))[1].lower()
+    """Store an uploaded resume as a new entry, read it, make it the one in use and fill in its details."""
+    name = str(b.get("filename", ""))
+    ext = os.path.splitext(name)[1].lower()
     if ext not in RESUME_TYPES:
         raise ValueError("Please upload a .docx, .pdf or .txt resume.")
     try:
@@ -165,8 +223,13 @@ def save_resume(b):
         raise ValueError("The file is empty or bigger than 5 MB.")
     if RESUME_TYPES[ext] and not raw.startswith(RESUME_TYPES[ext]):
         raise ValueError(f"That does not look like a real {ext} file.")
-    data = os.path.join(ROOT, "data")
-    dest = os.path.join(data, "resume" + ext)  # fixed name: the uploaded file name is never used as a path
+    reg = _registry()
+    if len(reg["items"]) >= MAX_RESUMES:
+        raise ValueError(f"You can keep up to {MAX_RESUMES} resumes. Delete one first.")
+    _, rdir, _, pp, sp = _p()
+    os.makedirs(rdir, exist_ok=True)
+    rid = secrets.token_hex(4)
+    dest = os.path.join(rdir, rid + ext)  # generated name: the uploaded file name is never used as a path
     with open(dest + ".tmp", "wb") as f:
         f.write(raw)
     os.replace(dest + ".tmp", dest)
@@ -177,18 +240,61 @@ def save_resume(b):
     except Exception as e:
         os.remove(dest)
         raise ValueError(str(e) if isinstance(e, ValueError) else "Could not read that file. Try saving it as .docx or .pdf again.")
-    for other in RESUME_TYPES:  # only one resume at a time
-        if other != ext and os.path.exists(os.path.join(data, "resume" + other)):
-            os.remove(os.path.join(data, "resume" + other))
     found = rparse.extract_profile(text, core.resume_skills(text))
-    pp, sp = os.path.join(data, "profile.json"), os.path.join(data, "settings.json")
-    _write_json(pp, {**_read_json(pp), **found["profile"], "resume_path": f"data/resume{ext}"})
+    label = _label(b.get("label")) or _label(re.sub(r"[_\-]+", " ", os.path.splitext(os.path.basename(name))[0])) or f"Resume {len(reg['items']) + 1}"
+    if reg["active"]:
+        _snapshot(reg["active"])  # keep edits made to the resume we are leaving
     prefs = {k: found[k] for k in ("titles", "locations", "preferred_locations", "experience_levels") if found.get(k)}
-    if prefs:
-        _write_json(sp, {**_read_json(sp), **prefs})
+    item = {"id": rid, "label": label, "path": f"data/resumes/{rid}{ext}"}
+    _write_json(os.path.join(rdir, rid + ".json"), {"profile": {**_read_json(pp), **found["profile"]}, "settings": {**_read_json(sp), **prefs}})
+    reg["items"].append(item)
+    _activate(reg, item)
     out = get_settings()
     out["found"] = sorted(found["profile"])
     return out
+
+
+def resume_select(b):
+    reg = _registry()
+    item = _find(reg, b.get("id"))
+    if reg["active"] and reg["active"] != item["id"]:
+        _snapshot(reg["active"])
+    _activate(reg, item)
+    return get_settings()
+
+
+def resume_rename(b):
+    reg = _registry()
+    item = _find(reg, b.get("id"))
+    label = _label(b.get("label"))
+    if not label:
+        raise ValueError("Please enter a name.")
+    item["label"] = label
+    _, _, rp, pp, _ = _p()
+    _write_json(rp, reg)
+    if reg["active"] == item["id"]:
+        _write_json(pp, {**_read_json(pp), "resume_label": label})
+    return get_settings()
+
+
+def resume_delete(b):
+    reg = _registry()
+    item = _find(reg, b.get("id"))
+    data, rdir, rp, pp, _ = _p()
+    for f in (os.path.join(ROOT, item["path"]), os.path.join(rdir, item["id"] + ".json")):
+        if os.path.exists(f) and os.path.realpath(f).startswith(os.path.realpath(data) + os.sep):  # only ever delete inside data/
+            os.remove(f)
+    reg["items"] = [i for i in reg["items"] if i["id"] != item["id"]]
+    if reg["active"] == item["id"]:
+        if reg["items"]:
+            _activate(reg, reg["items"][0])
+        else:
+            reg["active"] = ""
+            _write_json(rp, reg)
+            _write_json(pp, {**_read_json(pp), "resume_path": "", "resume_label": ""})
+    else:
+        _write_json(rp, reg)
+    return get_settings()
 
 
 def save_profile(b):
@@ -279,8 +385,10 @@ def make_handler(db_path):
                 if n > 10 * 1024 * 1024:
                     return self._send(413, {"error": "That upload is too large."})
                 b = json.loads(self.rfile.read(n) or b"{}")
-                if self.path == "/api/resume":
-                    return self._send(200, save_resume(b))
+                routes = {"/api/resume": save_resume, "/api/resume/select": resume_select,
+                          "/api/resume/rename": resume_rename, "/api/resume/delete": resume_delete}
+                if self.path in routes:
+                    return self._send(200, routes[self.path](b))
                 if self.path == "/api/profile":
                     save_profile(b)
                 elif self.path == "/api/status":

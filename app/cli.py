@@ -33,6 +33,8 @@ def do_search(cfg, tracker, offline=None):
     else:
         jobs = core.fetch_jobs(cfg)
     top = core.rank(jobs, cfg, skills)
+    for j in top:
+        j["resume"] = cfg["profile"].get("resume_label", "")  # which resume this match was scored against
     new = tracker.save(top)
     if notify.send(cfg, tracker.last_new):
         print(f"Alert sent for {len(tracker.last_new)} new match(es).")
@@ -60,11 +62,11 @@ def export_all(db_path, out):
     con.close()
     with open(out, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["Score", "Role", "Company", "Location", "Salary", "Status", "Missing skills", "Notes", "Updated", "Apply Link"])
+        w.writerow(["Score", "Role", "Company", "Location", "Salary", "Status", "Missing skills", "Resume", "Notes", "Updated", "Apply Link"])
         for sc, t, c, st, u, d, n, up in rows:
             d = json.loads(d or "{}")
             w.writerow([csv_safe(x) for x in (sc, t, c, d.get("location", ""), d.get("salary", ""), st,
-                                              ", ".join(d.get("missing", [])), n or "", up, u)])
+                                              ", ".join(d.get("missing", [])), d.get("resume", ""), n or "", up, u)])
     return len(rows)
 
 

@@ -13,6 +13,7 @@ See **READ ME FIRST.txt** for the step-by-step version.
 ## Features
 - Three job sources out of the box: LinkedIn, Naukri and Indeed (Naukri/Indeed run once per title; see `sources:` in config.yaml)
 - Add your own skills and role words under `vocabulary:` so it works outside cybersecurity
+- Several resumes (for example Pentester, Cloud): each has its own skills, details and searches; pick the one in use in Setup
 - Resume-based scoring with whole-word skill matching, senior-title filter, company and keyword blocklists
 - Skill gap per job (skills you have vs. asked for), salary detection, resume-gap summary
 - Web app: jobs list, search, sort, star, bulk status change, notes, cover letter, interview prep questions

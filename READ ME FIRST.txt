@@ -12,6 +12,8 @@ EVERY TIME:
   3. The "Setup" page opens by itself the first time. Do these in order:
        Step 1: click "Choose File" and pick your resume (Word, PDF or text).
                JobHunter reads it and fills in your name, email, phone, city, skills and job titles.
+       Have more than one kind of job in mind? Add another resume with its own name, then press "Use"
+       on whichever one you want JobHunter to work with.
        Step 2: paste your Apify key and click "Save key".
                (Get it at console.apify.com > Settings > API and integrations.)
        Step 3: check the details, fix anything wrong, then click "Save and find jobs".

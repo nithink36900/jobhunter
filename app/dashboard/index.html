@@ -51,6 +51,7 @@ pre.log{background:#0f1720;color:#cfe3ee;border-radius:8px;padding:14px;min-heig
 .form{display:grid;gap:14px;max-width:560px}.form label{display:grid;gap:4px;font-weight:600;font-size:14px}.form small{font-weight:400;color:var(--mute)}
 .checks{display:flex;gap:16px;font-weight:400}.checks label{display:flex;gap:6px;font-weight:400}
 .banner{background:color-mix(in srgb,var(--opened_manual) 14%,var(--panel));border:1px solid var(--opened_manual);border-radius:8px;padding:12px 14px;margin-bottom:18px}
+.rrow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--line)}.rrow small{color:var(--mute)}
 .star{color:#d49a00}.bars div{display:grid;grid-template-columns:150px 1fr 36px;gap:8px;align-items:center;font-size:13px;margin:3px 0}.bars i{display:block;height:12px;background:var(--accent);border-radius:3px;min-width:2px}.chip.gap{border-color:var(--rejected);color:var(--rejected)}.chip.have{border-color:var(--applied);color:var(--applied)}ul.q{margin:4px 0 0;padding-left:20px;font-size:13px}
 .note{color:var(--mute);font-size:13px}.ok{color:var(--applied)}.bad{color:var(--rejected)}
 </style>
@@ -169,7 +170,7 @@ async function openJob(url) {
     <dl class="kv"><dt>Match</dt><dd><b>${j.score}%</b></dd>
       <dt>Location</dt><dd>${esc(j.location)} ${esc(j.work_type)}</dd>
       <dt>Level</dt><dd>${esc(j.level)} ${esc(j.type)}</dd>
-      <dt>Salary</dt><dd>${esc(j.salary) || "not listed"}</dd><dt>Posted</dt><dd>${esc(j.posted)}</dd><dt>Applicants</dt><dd>${esc(j.applicants) || "unknown"}</dd>
+      ${j.resume ? `<dt>Resume</dt><dd>${esc(j.resume)}</dd>` : ""}<dt>Salary</dt><dd>${esc(j.salary) || "not listed"}</dd><dt>Posted</dt><dd>${esc(j.posted)}</dd><dt>Applicants</dt><dd>${esc(j.applicants) || "unknown"}</dd>
       <dt>Status</dt><dd><select id="st">${statuses.map(s => `<option value="${s}" ${s === j.status ? "selected" : ""}>${label(s)}</option>`).join("")}</select></dd></dl>
     <p><a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="noopener">Open application page</a>
     ${j.job_url && j.job_url !== j.apply_url ? ` <a class="btn ghost" href="${esc(j.job_url)}" target="_blank" rel="noopener">Job post</a>` : ""}</p>
@@ -261,9 +262,14 @@ async function settingsView(msg = "") {
   tokenSet = d.token_set; resumeSet = !!d.resume;
   $("#view").innerHTML = `<h2>Setup</h2><p class="sub">Upload your resume, add your Apify key, check the details we filled in, then search. Everything is stored on this computer only.</p>
   ${msg ? `<div class="banner">${msg}</div>` : ""}
-  <h3>1. Your resume</h3>
-  <div class="form"><p class="note">${d.resume ? `<span class="ok">Using ${esc(d.resume)}.</span> Upload a new file to replace it (this refills the details below).` : "No resume yet. Upload a Word (.docx), PDF or text file."}</p>
-    <input type="file" id="rf" accept=".docx,.pdf,.txt" aria-label="Resume file"><span class="note" id="rm"></span></div>
+  <h3>1. Your resumes</h3>
+  <div class="form"><p class="note">${d.resumes.length ? "Keep one resume per kind of job. The one marked <b>in use</b> decides your skills, searches and applications." : "No resume yet. Upload a Word (.docx), PDF or text file."}</p>
+    ${d.resumes.map(r => `<div class="rrow"><span><b>${esc(r.label)}</b> <small>${esc(r.file)}</small> ${r.active ? '<span class="chip have">in use</span>' : ""}</span>
+      <span>${r.active ? "" : `<button class="btn ghost" data-ra="select" data-id="${esc(r.id)}">Use</button> `}<button class="btn ghost" data-ra="rename" data-id="${esc(r.id)}" data-l="${esc(r.label)}">Rename</button>
+      <button class="btn ghost" data-ra="delete" data-id="${esc(r.id)}" data-l="${esc(r.label)}">Delete</button></span></div>`).join("")}
+    <label>${d.resumes.length ? "Add another resume" : "Upload your resume"} <small>Optional name, for example "Pentester" or "Developer"</small><input type="text" id="rl" maxlength="40" placeholder="Name for this resume"></label>
+    <input type="file" id="rf" accept=".docx,.pdf,.txt" aria-label="Resume file"><span class="note" id="rm"></span>
+    <p class="note">Uploading a resume makes it the one in use and fills the details below from it.</p></div>
   <h3>2. Apify key</h3>
   <div class="form"><p class="note">${d.token_set ? '<span class="ok">A key is saved.</span> Paste a new one only to replace it.' : 'Get yours at console.apify.com, Settings, API and integrations, then paste it here.'}</p>
     <input type="password" id="tk" autocomplete="off" placeholder="apify_api_..." aria-label="Apify token">
@@ -291,10 +297,19 @@ async function settingsView(msg = "") {
     if (f.size > 5 * 1024 * 1024) return say("#rm", false, " That file is bigger than 5 MB.");
     $("#rm").textContent = " Reading your resume...";
     try {
-      const r = await api("/api/resume", {filename: f.name, data: toB64(await f.arrayBuffer())});
+      const r = await api("/api/resume", {filename: f.name, data: toB64(await f.arrayBuffer()), label: $("#rl").value});
       await settingsView(`<b>Resume read.</b> Found: ${r.found.map(x => x.replace(/_/g, " ")).join(", ") || "no contact details"}, and ${r.skills.length} skills. Check the details below${tokenSet ? ", then press Save and find jobs." : ", add your Apify key, then press Save and find jobs."}`);
     } catch (err) { say("#rm", false, " " + err.message); }
   };
+  document.querySelectorAll("[data-ra]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.id, act = b.dataset.ra;
+    try {
+      if (act === "rename") { const l = prompt("New name for this resume:", b.dataset.l); if (!l) return; await api("/api/resume/rename", {id, label: l}); return settingsView("Renamed."); }
+      if (act === "delete") { if (!confirm(`Delete "${b.dataset.l}"? The file is removed from this computer. Jobs already found are kept.`)) return;
+        await api("/api/resume/delete", {id}); return settingsView("Deleted."); }
+      await api("/api/resume/select", {id}); settingsView(`Now using <b>${esc(b.closest(".rrow").querySelector("b").textContent)}</b>. The details, skills and searches below belong to it.`);
+    } catch (e) { say("#rm", false, " " + e.message); }
+  });
   $("#tks").onclick = async () => {
     try { await api("/api/token", {token: $("#tk").value}); tokenSet = true; $("#tk").value = ""; say("#tkm", true, " Key saved."); }
     catch (e) { say("#tkm", false, " " + e.message); }
