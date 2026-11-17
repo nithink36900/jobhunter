@@ -47,7 +47,7 @@ def validate_cfg(cfg):
         raise SystemExit("\n".join(errs))
     p, m = cfg["profile"], cfg["matching"]
     if not os.path.exists(p.get("resume_path", "")):
-        errs.append("No resume yet. Open the web app (python run.py dashboard), go to Setup and upload your resume.")
+        errs.append("No resume yet. Open the web app (python run.py dashboard), go to Setup and upload your resume as a Word (.docx) file.")
     if not str(p.get("full_name", "")).strip() or "YOUR" in str(p.get("full_name", "")).upper():
         errs.append("Your name is not set. Upload your resume in the web app's Setup page, or fill in config.local.yaml.")
     w = m.get("weights", {})

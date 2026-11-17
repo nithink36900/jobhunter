@@ -3,9 +3,11 @@
     python run.py dashboard          # then open http://127.0.0.1:8765
 """
 import base64
+import io
 import json
 import os
 import secrets
+import zipfile
 import re
 import sqlite3
 import subprocess
@@ -24,7 +26,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 STATUSES = ["new", "applied", "opened_manual", "submitted_auto", "interview", "offer",
             "rejected", "skipped", "error"]
 RUN = {"proc": None, "log": [], "code": None}
-RESUME_TYPES = {".docx": b"PK", ".pdf": b"%PDF", ".txt": None}  # allowed extensions and the bytes a real file starts with
+RESUME_TYPES = {".docx": b"PK"}  # Word documents only, and the bytes a real one starts with
 PROFILE_KEYS = ("full_name", "email", "phone", "city", "state", "country", "linkedin", "github",
                 "notice_period", "graduation_year", "years_experience", "cover_letter_template")
 
@@ -170,7 +172,7 @@ def _registry():
              and os.path.exists(os.path.join(ROOT, str(i["path"])))]
     if not items:
         cur = _read_json(pp).get("resume_path")
-        if cur and os.path.exists(os.path.join(ROOT, cur)):
+        if cur and cur.lower().endswith(".docx") and os.path.exists(os.path.join(ROOT, cur)):
             items = [{"id": "main", "label": "My resume", "path": cur}]
     active = reg.get("active") if reg.get("active") in {i["id"] for i in items} else (items[0]["id"] if items else "")
     return {"items": items, "active": active}
@@ -213,16 +215,23 @@ def save_resume(b):
     """Store an uploaded resume as a new entry, read it, make it the one in use and fill in its details."""
     name = str(b.get("filename", ""))
     ext = os.path.splitext(name)[1].lower()
+    if ext == ".doc":
+        raise ValueError("Old .doc files are not accepted. Open it in Word, choose Save As, Word Document (.docx), and upload that.")
     if ext not in RESUME_TYPES:
-        raise ValueError("Please upload a .docx, .pdf or .txt resume.")
+        raise ValueError("Please upload your resume as a Word document (.docx). PDF and other formats are not accepted.")
     try:
         raw = base64.b64decode(b["data"], validate=True)
     except (ValueError, KeyError):
         raise ValueError("The upload was damaged. Please try again.")
     if not raw or len(raw) > 5 * 1024 * 1024:
         raise ValueError("The file is empty or bigger than 5 MB.")
-    if RESUME_TYPES[ext] and not raw.startswith(RESUME_TYPES[ext]):
-        raise ValueError(f"That does not look like a real {ext} file.")
+    try:  # a real .docx is a zip with word/document.xml (this also rejects renamed .xlsx/.pptx/.pdf files)
+        with zipfile.ZipFile(io.BytesIO(raw)) as z:
+            if not raw.startswith(RESUME_TYPES[ext]) or "word/document.xml" not in z.namelist() \
+                    or sum(i.file_size for i in z.infolist()) > 50 * 1024 * 1024:
+                raise ValueError
+    except (zipfile.BadZipFile, ValueError):
+        raise ValueError("That is not a valid Word (.docx) file. Please save your resume as a Word document and try again.")
     reg = _registry()
     if len(reg["items"]) >= MAX_RESUMES:
         raise ValueError(f"You can keep up to {MAX_RESUMES} resumes. Delete one first.")
@@ -236,10 +245,10 @@ def save_resume(b):
     try:
         text = core.read_resume(dest)
         if len(text.strip()) < 30:
-            raise ValueError("No readable text found. If this is a scanned PDF, upload a .docx or a text-based PDF.")
+            raise ValueError("No readable text found. Make sure the resume is typed text, not a picture.")
     except Exception as e:
         os.remove(dest)
-        raise ValueError(str(e) if isinstance(e, ValueError) else "Could not read that file. Try saving it as .docx or .pdf again.")
+        raise ValueError(str(e) if isinstance(e, ValueError) else "Could not read that file. Try opening it in Word and saving it again as .docx.")
     found = rparse.extract_profile(text, core.resume_skills(text))
     label = _label(b.get("label")) or _label(re.sub(r"[_\-]+", " ", os.path.splitext(os.path.basename(name))[0])) or f"Resume {len(reg['items']) + 1}"
     if reg["active"]:

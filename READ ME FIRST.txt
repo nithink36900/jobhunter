@@ -10,7 +10,7 @@ EVERY TIME:
      - Then your web browser opens JobHunter by itself.
      - If Windows says "protected your PC", click "More info", then "Run anyway".
   3. The "Setup" page opens by itself the first time. Do these in order:
-       Step 1: click "Choose File" and pick your resume (Word, PDF or text).
+       Step 1: click "Choose File" and pick your resume. It must be a Word file (.docx); other formats are not accepted.
                JobHunter reads it and fills in your name, email, phone, city, skills and job titles.
        Have more than one kind of job in mind? Add another resume with its own name, then press "Use"
        on whichever one you want JobHunter to work with.

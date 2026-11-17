@@ -263,12 +263,12 @@ async function settingsView(msg = "") {
   $("#view").innerHTML = `<h2>Setup</h2><p class="sub">Upload your resume, add your Apify key, check the details we filled in, then search. Everything is stored on this computer only.</p>
   ${msg ? `<div class="banner">${msg}</div>` : ""}
   <h3>1. Your resumes</h3>
-  <div class="form"><p class="note">${d.resumes.length ? "Keep one resume per kind of job. The one marked <b>in use</b> decides your skills, searches and applications." : "No resume yet. Upload a Word (.docx), PDF or text file."}</p>
+  <div class="form"><p class="note">${d.resumes.length ? "Keep one resume per kind of job. The one marked <b>in use</b> decides your skills, searches and applications." : "No resume yet. Upload your resume as a Word document (.docx). Other formats are not accepted."}</p>
     ${d.resumes.map(r => `<div class="rrow"><span><b>${esc(r.label)}</b> <small>${esc(r.file)}</small> ${r.active ? '<span class="chip have">in use</span>' : ""}</span>
       <span>${r.active ? "" : `<button class="btn ghost" data-ra="select" data-id="${esc(r.id)}">Use</button> `}<button class="btn ghost" data-ra="rename" data-id="${esc(r.id)}" data-l="${esc(r.label)}">Rename</button>
       <button class="btn ghost" data-ra="delete" data-id="${esc(r.id)}" data-l="${esc(r.label)}">Delete</button></span></div>`).join("")}
     <label>${d.resumes.length ? "Add another resume" : "Upload your resume"} <small>Optional name, for example "Pentester" or "Developer"</small><input type="text" id="rl" maxlength="40" placeholder="Name for this resume"></label>
-    <input type="file" id="rf" accept=".docx,.pdf,.txt" aria-label="Resume file"><span class="note" id="rm"></span>
+    <input type="file" id="rf" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" aria-label="Resume file (Word .docx only)"><span class="note" id="rm"></span>
     <p class="note">Uploading a resume makes it the one in use and fills the details below from it.</p></div>
   <h3>2. Apify key</h3>
   <div class="form"><p class="note">${d.token_set ? '<span class="ok">A key is saved.</span> Paste a new one only to replace it.' : 'Get yours at console.apify.com, Settings, API and integrations, then paste it here.'}</p>
@@ -294,6 +294,7 @@ async function settingsView(msg = "") {
   const say = (id, ok, t) => $(id).innerHTML = `<span class="${ok ? "ok" : "bad"}">${esc(t)}</span>`;
   $("#rf").onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
+    if (!/\.docx$/i.test(f.name)) { e.target.value = ""; return say("#rm", false, /\.doc$/i.test(f.name) ? " Old .doc files are not accepted. Save it as .docx in Word first." : " Only Word documents (.docx) are accepted."); }
     if (f.size > 5 * 1024 * 1024) return say("#rm", false, " That file is bigger than 5 MB.");
     $("#rm").textContent = " Reading your resume...";
     try {

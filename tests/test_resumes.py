@@ -1,4 +1,4 @@
-import base64, io, os, shutil, tempfile, unittest
+import base64, io, os, shutil, tempfile, unittest, zipfile
 import docx
 from app.dashboard import server
 
@@ -55,15 +55,29 @@ class MultiResume(unittest.TestCase):
         self.assertEqual([x["label"] for x in s["resumes"]], ["My resume"])
 
     def test_rejects_bad_input_and_path_tricks(self):
-        for bad in ({"filename": "a.exe", "data": "QUJD"}, {"filename": "a.docx", "data": base64.b64encode(b"nope").decode()}, {"filename": "a.docx", "data": "!!!"}):
-            with self.assertRaises(ValueError):
+        zbuf = io.BytesIO()
+        with zipfile.ZipFile(zbuf, "w") as z:
+            z.writestr("xl/workbook.xml", "x")  # a zip that is not a Word file (e.g. a renamed spreadsheet)
+        word = make_docx(*PRIYA)
+        for bad in ({"filename": "a.exe", "data": "QUJD"}, {"filename": "a.docx", "data": base64.b64encode(b"nope").decode()}, {"filename": "a.docx", "data": "!!!"},
+                    {"filename": "cv.pdf", "data": word["data"]}, {"filename": "cv.txt", "data": word["data"]}, {"filename": "cv.doc", "data": word["data"]},
+                    {"filename": "cv.docx", "data": base64.b64encode(zbuf.getvalue()).decode()}):
+            with self.assertRaises(ValueError, msg=bad["filename"]):
                 server.save_resume(bad)
+        self.assertEqual(server.get_settings()["resumes"], [])  # nothing was stored
+        rd = os.path.join(self.tmp, "data", "resumes")
+        self.assertEqual(os.listdir(rd) if os.path.isdir(rd) else [], [])  # no leftover files
         for fn in (server.resume_select, server.resume_delete):
             with self.assertRaises(ValueError):
                 fn({"id": "../../etc/passwd"})
         server.save_resume(make_docx(*PRIYA))
         with self.assertRaises(ValueError):
             server.resume_rename({"id": "main", "label": "x"})
+
+    def test_old_pdf_resume_is_not_adopted(self):
+        open(os.path.join(self.tmp, "data", "resume.pdf"), "wb").write(b"%PDF-1.4")
+        server._write_json(os.path.join(self.tmp, "data", "profile.json"), {"resume_path": "data/resume.pdf"})
+        self.assertEqual(server.get_settings()["resumes"], [])
 
     def test_limit(self):
         for _ in range(server.MAX_RESUMES):
